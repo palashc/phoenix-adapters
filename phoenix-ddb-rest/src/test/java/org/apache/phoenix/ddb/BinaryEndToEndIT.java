@@ -103,10 +103,9 @@ public class BinaryEndToEndIT {
     private static String tmpDir;
     private static RESTServer restServer = null;
 
-    // TODO: Add - to names when streams can support it
     private static String TABLE_NAME = "Binary.PK_Test-Table";
     private static String INDEX_NAME = "Binary.PK_Test-Index";
-    Random random = new Random(42);
+    private static Random random = new Random(42);
 
     @BeforeClass
     public static void initialize() throws Exception {
@@ -866,73 +865,7 @@ public class BinaryEndToEndIT {
         }
     }
 
-    @Test
-    public void getStreamRecords() throws InterruptedException {
-        UpdateTableRequest utr =   UpdateTableRequest.builder()
-                .tableName(TABLE_NAME)
-                .streamSpecification(StreamSpecification.builder().streamEnabled(true).streamViewType("NEW_AND_OLD_IMAGES").build())
-                .build();
-        dynamoDbClient.updateTable(utr);
-        phoenixDBClientV2.updateTable(utr);
-        ListStreamsRequest lsr = ListStreamsRequest.builder().tableName(TABLE_NAME).build();
-        ListStreamsResponse phoenixStreams = phoenixDBStreamsClientV2.listStreams(lsr);
-        String phoenixStreamArn = phoenixStreams.streams().get(0).streamArn();
-        String dynamoStreamArn = dynamoDbStreamsClient.listStreams(lsr).streams().get(0).streamArn();
-        TestUtils.waitForStream(phoenixDBStreamsClientV2, phoenixStreamArn);
-        TestUtils.waitForStream(dynamoDbStreamsClient, dynamoStreamArn);
-
-        List<Map<String, AttributeValue>> keys = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
-            Map<String, AttributeValue> item = getItem(i);
-            keys.add(getKey(item));
-            PutItemRequest pir = PutItemRequest.builder().tableName(TABLE_NAME).item(item).build();
-            dynamoDbClient.putItem(pir);
-            phoenixDBClientV2.putItem(pir);
-        }
-        for (int i = 0; i < 20; i+=2) {
-            byte[] index_hk = new byte[11];
-            random.nextBytes(index_hk);
-            Map<String, AttributeValue> exprAttrVals = new HashMap<>();
-            exprAttrVals.put(":val1", AttributeValue.builder().b(SdkBytes.fromByteArray(index_hk)).build());
-            UpdateItemRequest uir = UpdateItemRequest.builder()
-                    .tableName(TABLE_NAME)
-                    .key(keys.get(i))
-                    .updateExpression("SET index_hk = :val1")
-                    .expressionAttributeValues(exprAttrVals)
-                    .build();
-            dynamoDbClient.updateItem(uir);
-            phoenixDBClientV2.updateItem(uir);
-        }
-        for (int i = 1; i < 20; i+=2) {
-            DeleteItemRequest delr = DeleteItemRequest.builder()
-                    .tableName(TABLE_NAME)
-                    .key(keys.get(i))
-                    .build();
-            dynamoDbClient.deleteItem(delr);
-            phoenixDBClientV2.deleteItem(delr);
-        }
-
-        DescribeStreamRequest dsr = DescribeStreamRequest.builder().streamArn(phoenixStreamArn).build();
-        StreamDescription phoenixStreamDesc = phoenixDBStreamsClientV2.describeStream(dsr).streamDescription();
-        String phoenixShardId = phoenixStreamDesc.shards().get(0).shardId();
-        List<Record> phoenixRecords = TestUtils.getRecordsFromShardWithLimit(phoenixDBStreamsClientV2,
-                phoenixStreamArn, phoenixShardId, TRIM_HORIZON, null, 11);
-
-        dsr = DescribeStreamRequest.builder().streamArn(dynamoStreamArn).build();
-        String ddbShardId = dynamoDbStreamsClient.describeStream(dsr).streamDescription().shards().get(0).shardId();
-        List<Record> ddbRecords = TestUtils.getRecordsFromShardWithLimit(dynamoDbStreamsClient,
-                dynamoStreamArn, ddbShardId, TRIM_HORIZON, null, 7);
-
-        Assert.assertEquals(ddbRecords.size(), phoenixRecords.size());
-        for (int i = 0; i < phoenixRecords.size(); i++) {
-            StreamRecord ddbRecord = ddbRecords.get(i).dynamodb();
-            StreamRecord phoenixRecord = phoenixRecords.get(i).dynamodb();
-            Assert.assertEquals(ddbRecord.oldImage(), phoenixRecord.oldImage());
-            Assert.assertEquals(ddbRecord.newImage(), phoenixRecord.newImage());
-        }
-    }
-
-    private Map<String, AttributeValue> getItem(Integer num) {
+    public static Map<String, AttributeValue> getItem(Integer num) {
         byte[] hk = new byte[15];
         byte[] sk = new byte[23];
         byte[] index_hk = new byte[11];
@@ -950,7 +883,7 @@ public class BinaryEndToEndIT {
         return item;
     }
 
-    private Map<String, AttributeValue> getKey(Map<String, AttributeValue> item) {
+    public static Map<String, AttributeValue> getKey(Map<String, AttributeValue> item) {
         Map<String, AttributeValue> key = new HashMap<>();
         key.put("hk", item.get("hk"));
         key.put("sk", item.get("sk"));
