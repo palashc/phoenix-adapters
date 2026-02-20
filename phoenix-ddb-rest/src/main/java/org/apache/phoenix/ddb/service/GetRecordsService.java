@@ -171,14 +171,22 @@ public class GetRecordsService {
         PhoenixStreamRecord phoenixStreamRecord = new PhoenixStreamRecord(cdcJson, pkCols);
         switch (streamType) {
             case OLD_IMAGE:
-                streamRecord.put(ApiMetadata.OLD_IMAGE, phoenixStreamRecord.getPreImage());
+                if (phoenixStreamRecord.hasPreImage()) {
+                    streamRecord.put(ApiMetadata.OLD_IMAGE, phoenixStreamRecord.getPreImage());
+                }
                 break;
             case NEW_IMAGE:
-                streamRecord.put(ApiMetadata.NEW_IMAGE, phoenixStreamRecord.getPostImage());
+                if (phoenixStreamRecord.hasPostImage()) {
+                    streamRecord.put(ApiMetadata.NEW_IMAGE, phoenixStreamRecord.getPostImage());
+                }
                 break;
             case NEW_AND_OLD_IMAGES:
-                streamRecord.put(ApiMetadata.OLD_IMAGE, phoenixStreamRecord.getPreImage());
-                streamRecord.put(ApiMetadata.NEW_IMAGE, phoenixStreamRecord.getPostImage());
+                if (phoenixStreamRecord.hasPreImage()) {
+                    streamRecord.put(ApiMetadata.OLD_IMAGE, phoenixStreamRecord.getPreImage());
+                }
+                if (phoenixStreamRecord.hasPostImage()) {
+                    streamRecord.put(ApiMetadata.NEW_IMAGE, phoenixStreamRecord.getPostImage());
+                }
                 break;
         }
         //always set keys
