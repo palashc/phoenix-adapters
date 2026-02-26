@@ -90,6 +90,8 @@ public class RESTServer {
     private static final String START = "start";
     private static final String STOP = "stop";
     private static final String SERVER_NOT_RUNNING_ERR_MSG = "Server is not running";
+    private static final int VALIDATE_SYSCAT_CONNECTION_MAX_RETRIES = 10;
+    private static final long VALIDATE_SYSCAT_CONNECTION_RETRY_INTERVAL_MS = 1_000;
 
     public RESTServer(Configuration conf) {
         this.conf = conf;
@@ -287,11 +289,26 @@ public class RESTServer {
 
     private void validateConnection(String jdbcUrl) throws SQLException {
         LOG.info("Try connecting to SYSTEM.CATALOG using JDBC connection url: {}", jdbcUrl);
-        try (Connection connection = ConnectionUtil.getConnection(jdbcUrl)) {
-            ResultSet resultSet = connection.createStatement()
-                    .executeQuery("SELECT * FROM SYSTEM.CATALOG LIMIT 1");
-            resultSet.next();
+        SQLException lastException = null;
+        for (int i = 0; i < VALIDATE_SYSCAT_CONNECTION_MAX_RETRIES; i++) {
+            try (Connection connection = ConnectionUtil.getConnection(jdbcUrl)) {
+                ResultSet resultSet = connection.createStatement()
+                        .executeQuery("SELECT * FROM SYSTEM.CATALOG LIMIT 1");
+                resultSet.next();
+                return;
+            } catch (SQLException e) {
+                lastException = e;
+                LOG.warn("Attempt {}/{} to validate connection failed",
+                        i + 1, VALIDATE_SYSCAT_CONNECTION_MAX_RETRIES, e);
+                try {
+                    Thread.sleep(VALIDATE_SYSCAT_CONNECTION_RETRY_INTERVAL_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
+        throw lastException;
     }
 
     private ExecutorService startAsyncIndexManager(String jdbcUrl) {
@@ -322,7 +339,8 @@ public class RESTServer {
 
     public synchronized void stop() throws Exception {
         if (server == null) {
-            throw new IllegalStateException(SERVER_NOT_RUNNING_ERR_MSG);
+            LOG.warn("Server is not running, nothing to stop");
+            return;
         }
         if (indexBuildingActivator != null) {
             indexBuildingActivator.shutdown();
