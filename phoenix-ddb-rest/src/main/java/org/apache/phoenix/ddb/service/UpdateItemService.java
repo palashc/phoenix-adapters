@@ -26,7 +26,6 @@ import org.apache.phoenix.ddb.utils.ApiMetadata;
 import org.apache.phoenix.ddb.utils.PhoenixUtils;
 import org.apache.phoenix.ddb.rest.metrics.ApiOperation;
 import org.apache.phoenix.ddb.utils.CommonServiceUtils;
-import org.apache.phoenix.expression.util.bson.SQLComparisonExpressionUtils;
 import org.apache.phoenix.schema.PColumn;
 
 public class UpdateItemService {
@@ -68,9 +67,6 @@ public class UpdateItemService {
             "UPSERT INTO %s VALUES (?,?) " + " ON DUPLICATE KEY UPDATE_ONLY\n"
                     + " COL = CASE WHEN BSON_CONDITION_EXPRESSION(COL,?) "
                     + " THEN BSON_UPDATE_EXPRESSION(COL,?) \n" + " ELSE COL END";
-
-    private static final BsonDocument EMPTY_BSON_DOC = new BsonDocument();
-    private static final RawBsonDocument EMPTY_RAW_BSON_DOC = RawBsonDocument.parse("{}");
 
     public static Map<String, Object> updateItem(Map<String, Object> request,
             String connectionUrl) {
@@ -254,7 +250,7 @@ public class UpdateItemService {
 
         if (hasCondition) {
             // Evaluate if condition can be satisfied on non-existing item
-            canCreateNewItemWithCondition = evaluateConditionOnNonExistingItem(condExpr, exprAttrNames);
+            canCreateNewItemWithCondition = CommonServiceUtils.evaluateConditionOnNonExistingItem(condExpr, exprAttrNames);
         }
 
         if (canCreateNewItemWithCondition && canEvaluateUpdateExprOnEmptyDoc) {
@@ -284,35 +280,6 @@ public class UpdateItemService {
                     return new QueryFormatInfo(format, false);
                 }
             }
-        }
-    }
-
-    /**
-     * Evaluate if a condition expression can be satisfied on a non-existing item.
-     * This determines whether UPDATE (allows creation) or UPDATE_ONLY (existing only) should be used.
-     * <p>
-     * DynamoDB semantics:
-     * - Non-existing items are treated as empty documents
-     * - Function calls on non-existing attributes typically return false/null
-     * - Existence checks (attribute_exists) return false
-     * - Value comparisons with non-existing attributes return false
-     * <p>
-     */
-    private static boolean evaluateConditionOnNonExistingItem(String condExpr,
-            Map<String, String> exprAttrNames) {
-        try {
-            BsonDocument exprAttrNamesDoc =
-                    CommonServiceUtils.getExpressionAttributeNamesDoc(exprAttrNames);
-            boolean result = SQLComparisonExpressionUtils.evaluateConditionExpression(condExpr,
-                    EMPTY_RAW_BSON_DOC, EMPTY_BSON_DOC, exprAttrNamesDoc);
-
-            LOGGER.debug("Condition '{}' evaluation on empty document: {}", condExpr, result);
-            return result;
-        } catch (Exception e) {
-            // If condition evaluation fails, be conservative and assume it cannot be satisfied
-            LOGGER.warn("Failed to evaluate condition '{}' on empty document, assuming false: {}",
-                    condExpr, e.getMessage());
-            return false;
         }
     }
 

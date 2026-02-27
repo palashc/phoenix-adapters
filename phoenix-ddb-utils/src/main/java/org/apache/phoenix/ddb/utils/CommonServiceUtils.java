@@ -18,6 +18,10 @@
 
 package org.apache.phoenix.ddb.utils;
 
+import org.apache.phoenix.expression.util.bson.SQLComparisonExpressionUtils;
+import org.bson.RawBsonDocument;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 import org.apache.commons.lang3.StringUtils;
@@ -49,6 +53,9 @@ public class CommonServiceUtils {
     public static final String DOUBLE_QUOTE = "\"";
     public static final String HASH = "#";
     private static final Pattern EXPR_ATTR_NAME_PATTERN = Pattern.compile("#([a-zA-Z0-9_]+)");
+    private static final BsonDocument EMPTY_BSON_DOC = new BsonDocument();
+    private static final RawBsonDocument EMPTY_RAW_BSON_DOC = RawBsonDocument.parse("{}");
+    private static final Logger LOGGER = LoggerFactory.getLogger(CommonServiceUtils.class);
 
     public static boolean isCauseMessageAvailable(Exception e) {
         return e.getCause() != null && e.getCause().getMessage() != null;
@@ -548,5 +555,43 @@ public class CommonServiceUtils {
             return null;
         }
         return String.join(", ", attributesToGet);
+    }
+
+    /**
+     * Evaluate if a condition expression can be satisfied on a non-existing item.
+     * Returns true if the condition PASSES when evaluated against an empty document.
+     * <p>
+     * <b>Usage by UpdateItemService:</b>
+     * Determines whether UPDATE (allows creation) or UPDATE_ONLY (existing only) query should be used.
+     * If condition passes on empty doc, the item can be created if it doesn't exist.
+     * <p>
+     * <b>Usage by DeleteItemService:</b>
+     * Determines behavior when DELETE returns no row. If condition passes on empty doc,
+     * a missing row is valid (no-op). If condition fails on empty doc, throw
+     * ConditionalCheckFailedException.
+     * TODO: When condition passes on empty doc but no row was
+     * TODO: returned, DeleteItemService must distinguish between
+     * TODO: "row didn't exist" (success) vs "row existed but condition failed" (throw exception).
+     *
+     * @param condExpr the condition expression string
+     * @param exprAttrNames expression attribute names map
+     * @return true if condition passes on empty document, false otherwise
+     */
+    public static boolean evaluateConditionOnNonExistingItem(String condExpr,
+                                                              Map<String, String> exprAttrNames) {
+        try {
+            BsonDocument exprAttrNamesDoc =
+                    CommonServiceUtils.getExpressionAttributeNamesDoc(exprAttrNames);
+            boolean result = SQLComparisonExpressionUtils.evaluateConditionExpression(condExpr,
+                    EMPTY_RAW_BSON_DOC, EMPTY_BSON_DOC, exprAttrNamesDoc);
+
+            LOGGER.debug("Condition '{}' evaluation on empty document: {}", condExpr, result);
+            return result;
+        } catch (Exception e) {
+            // If condition evaluation fails, be conservative and assume it cannot be satisfied
+            LOGGER.warn("Failed to evaluate condition '{}' on empty document, assuming false: {}",
+                    condExpr, e.getMessage());
+            return false;
+        }
     }
 }

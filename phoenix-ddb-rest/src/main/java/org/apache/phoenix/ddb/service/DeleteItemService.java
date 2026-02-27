@@ -75,10 +75,17 @@ public class DeleteItemService {
 
         boolean hasCondExp = (request.get(ApiMetadata.CONDITION_EXPRESSION) != null) || (
                 request.get(ApiMetadata.EXPECTED) != null);
+        boolean canEvaluateCondExprOnEmptyDoc = true;
+        if (hasCondExp && stmtInfo.condExpr != null) {
+            canEvaluateCondExprOnEmptyDoc = CommonServiceUtils.evaluateConditionOnNonExistingItem(
+                    stmtInfo.condExpr,
+                    (Map<String, String>) request.get(ApiMetadata.EXPRESSION_ATTRIBUTE_NAMES)
+            );
+        }
         return DMLUtils.executeUpdate(stmtInfo.stmt,
                 (String) request.get(ApiMetadata.RETURN_VALUES),
                 (String) request.get(ApiMetadata.RETURN_VALUES_ON_CONDITION_CHECK_FAILURE),
-                hasCondExp, true, pkCols, ApiOperation.DELETE_ITEM);
+                hasCondExp, canEvaluateCondExprOnEmptyDoc, pkCols, ApiOperation.DELETE_ITEM);
     }
 
     /**
@@ -141,7 +148,7 @@ public class DeleteItemService {
                         CommonServiceUtils.getEscapedArgument(partitionKeyPKCol)));
             }
         }
-        return new StatementInfo(stmt, conditionDoc);
+        return new StatementInfo(stmt, conditionDoc, condExpr);
     }
 
     /**
@@ -166,10 +173,12 @@ public class DeleteItemService {
     private static class StatementInfo {
         final PreparedStatement stmt;
         final BsonDocument conditionDoc;
+        final String condExpr;
 
-        StatementInfo(PreparedStatement stmt, BsonDocument conditionDoc) {
+        StatementInfo(PreparedStatement stmt, BsonDocument conditionDoc, String condExpr) {
             this.stmt = stmt;
             this.conditionDoc = conditionDoc;
+            this.condExpr = condExpr;
         }
     }
 }

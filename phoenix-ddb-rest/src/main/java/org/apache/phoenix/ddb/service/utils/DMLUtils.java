@@ -63,7 +63,7 @@ public class DMLUtils {
      * TODO: UPDATED_OLD | UPDATED_NEW
      */
     public static Map<String, Object> executeUpdate(PreparedStatement stmt, String returnValue,
-        String returnValuesOnConditionCheckFailure, boolean hasCondExp, boolean canEvaluateUpdateExprOnEmptyDoc,
+        String returnValuesOnConditionCheckFailure, boolean hasCondExp, boolean canEvaluateExprOnEmptyDoc,
                                                     List<PColumn> pkCols, ApiOperation apiOperation)
                             throws SQLException, ConditionCheckFailedException {
         try {
@@ -71,12 +71,22 @@ public class DMLUtils {
             if (!needReturnRow(returnValue, returnValuesOnConditionCheckFailure)) {
                 int returnStatus = stmt.executeUpdate();
                 if (returnStatus == 0) {
-                    if (hasCondExp) {
-                        throw new ConditionCheckFailedException();
-                    }
-                    if (!canEvaluateUpdateExprOnEmptyDoc && apiOperation == ApiOperation.UPDATE_ITEM) {
-                        throw new ValidationException(
-                                "The provided expression references an attribute that does not exist in the item");
+                    if (apiOperation == ApiOperation.DELETE_ITEM) {
+                        //there was a condition expression which could not be true on empty row
+                        if (hasCondExp && !canEvaluateExprOnEmptyDoc) {
+                            // Condition definitely fails on empty doc → throw
+                            throw new ConditionCheckFailedException();
+                        }
+                        // TODO: If canEvaluateExprOnEmptyDoc is true, we can't tell here if:
+                        // TODO: Row didn't exist (success) vs row existed but condition failed (should throw)
+                    } else {
+                        if (hasCondExp) {
+                            throw new ConditionCheckFailedException();
+                        }
+                        if (!canEvaluateExprOnEmptyDoc && apiOperation == ApiOperation.UPDATE_ITEM) {
+                            throw new ValidationException(
+                                    "The provided expression references an attribute that does not exist in the item");
+                        }
                     }
                 }
                 return new HashMap<>();
@@ -95,7 +105,8 @@ public class DMLUtils {
             RawBsonDocument rawBsonDocument =
                 rs == null ? null : (RawBsonDocument) rs.getObject(pkCols.size() + 1);
             if ((returnStatus == 0 && apiOperation != ApiOperation.DELETE_ITEM) ||
-                (apiOperation == ApiOperation.DELETE_ITEM && rawBsonDocument == null)) {
+                (apiOperation == ApiOperation.DELETE_ITEM && rawBsonDocument == null
+                        && !canEvaluateExprOnEmptyDoc)) {
                 if (hasCondExp) {
                     ConditionCheckFailedException conditionalCheckFailedException =
                         new ConditionCheckFailedException();
@@ -108,7 +119,7 @@ public class DMLUtils {
                     }
                     throw conditionalCheckFailedException;
                 }
-                if (!canEvaluateUpdateExprOnEmptyDoc && apiOperation == ApiOperation.UPDATE_ITEM) {
+                if (!canEvaluateExprOnEmptyDoc && apiOperation == ApiOperation.UPDATE_ITEM) {
                     throw new ValidationException(
                             "The provided expression references an attribute that does not exist in the item");
                 }
@@ -120,7 +131,7 @@ public class DMLUtils {
                         returnValue)) {
                         returnValuesInResponse = true;
                     }
-                } else if (ApiMetadata.ALL_OLD.equals(returnValue)) {
+                } else if (ApiMetadata.ALL_OLD.equals(returnValue) && rawBsonDocument != null) {
                     returnValuesInResponse = true;
                 }
                 if (returnValuesInResponse) {
