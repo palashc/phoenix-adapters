@@ -41,8 +41,7 @@ public class DQLUtils {
     public static Map<String, Object> executeStatementReturnResult(PreparedStatement stmt,
             List<String> projectionAttributes, boolean useIndex,
             List<PColumn> tablePKCols, List<PColumn> indexPKCols, String tableName,
-            boolean isSingleRowExpected, boolean isScanFirstQuery, boolean countOnly,
-            int effectiveLimit) throws SQLException {
+            boolean isSingleRowExpected, boolean isScanFirstQuery, boolean countOnly) throws SQLException {
         int count = 0;
         int bytesSize = 0;
         List<Map<String, Object>> items = new ArrayList<>();
@@ -70,9 +69,7 @@ public class DQLUtils {
                 response.put(ApiMetadata.ITEMS, items);
             }
             response.put(ApiMetadata.COUNT, count);
-            if (count == effectiveLimit || sizeLimitReached) {
-                response.put(ApiMetadata.LAST_EVALUATED_KEY, lastKey);
-            }
+            response.put(ApiMetadata.LAST_EVALUATED_KEY, lastKey);
             response.put(ApiMetadata.SCANNED_COUNT, countRowsScanned);
             response.put(ApiMetadata.CONSUMED_CAPACITY,
                     CommonServiceUtils.getConsumedCapacity(tableName));

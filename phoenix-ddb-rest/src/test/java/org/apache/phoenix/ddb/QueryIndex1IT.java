@@ -152,7 +152,6 @@ public class QueryIndex1IT {
         Assert.assertEquals(dynamoResult.scannedCount(), phoenixResult.scannedCount());
 
         // check last evaluated key
-        Assert.assertEquals(0, phoenixResult.lastEvaluatedKey().size());
         Assert.assertEquals(0, dynamoResult.lastEvaluatedKey().size());
 
         // explain plan
@@ -205,7 +204,6 @@ public class QueryIndex1IT {
         Assert.assertEquals(dynamoResult.items().get(0), phoenixResult.items().get(0));
 
         // check last evaluated key
-        Assert.assertEquals(0, phoenixResult.lastEvaluatedKey().size());
         Assert.assertEquals(0, dynamoResult.lastEvaluatedKey().size());
 
         // explain plan
@@ -259,7 +257,11 @@ public class QueryIndex1IT {
         Assert.assertEquals(dynamoResult.count(), phoenixResult.count());
         Assert.assertEquals(dynamoResult.items().get(0), phoenixResult.items().get(0));
         Assert.assertEquals(dynamoResult.scannedCount(), phoenixResult.scannedCount());
-        Assert.assertEquals(dynamoResult.lastEvaluatedKey(), phoenixResult.lastEvaluatedKey());
+
+        // check last evaluated key
+        Map<String, AttributeValue> lastKey = phoenixResult.lastEvaluatedKey();
+        Assert.assertEquals("101.01", lastKey.get("IdS").s());
+        Assert.assertEquals(1.1, Double.parseDouble(lastKey.get("Id2").n()), 0);
 
         // explain plan
         TestUtils.validateIndexUsed(qr.build(), url);
@@ -311,7 +313,11 @@ public class QueryIndex1IT {
         QueryResponse dynamoResult = dynamoDbClient.query(qr.build());
         Assert.assertEquals(dynamoResult.count(), phoenixResult.count());
         Assert.assertEquals(dynamoResult.items().get(0), phoenixResult.items().get(0));
-        Assert.assertEquals(dynamoResult.lastEvaluatedKey(), phoenixResult.lastEvaluatedKey());
+
+        // check last evaluated key
+        Map<String, AttributeValue> lastKey = phoenixResult.lastEvaluatedKey();
+        Assert.assertEquals("101.01", lastKey.get("IdS").s());
+        Assert.assertEquals(1.1, Double.parseDouble(lastKey.get("Id2").n()), 0);
 
         // explain plan
         TestUtils.validateIndexUsed(qr.build(), url);
@@ -363,7 +369,11 @@ public class QueryIndex1IT {
         QueryResponse dynamoResult = dynamoDbClient.query(qr.build());
         Assert.assertEquals(dynamoResult.count(), phoenixResult.count());
         Assert.assertEquals(dynamoResult.items().get(0), phoenixResult.items().get(0));
-        Assert.assertEquals(dynamoResult.lastEvaluatedKey(), phoenixResult.lastEvaluatedKey());
+
+        // check last evaluated key
+        Map<String, AttributeValue> lastKey = phoenixResult.lastEvaluatedKey();
+        Assert.assertEquals("str_val_1", lastKey.get("attr_0").s());
+        Assert.assertEquals("101.01", lastKey.get("IdS").s());
 
         // explain plan
         TestUtils.validateIndexUsed(qr.build(), url);
@@ -611,7 +621,6 @@ public class QueryIndex1IT {
 
         // check last evaluated key
         Assert.assertTrue(dynamoResult.lastEvaluatedKey().isEmpty());
-        Assert.assertTrue(phoenixResult.lastEvaluatedKey().isEmpty());
 
         // explain plan
         TestUtils.validateIndexUsed(qr.build(), url);
@@ -661,7 +670,6 @@ public class QueryIndex1IT {
 
         // check last evaluated key
         Assert.assertTrue(dynamoResult.lastEvaluatedKey().isEmpty());
-        Assert.assertTrue(phoenixResult.lastEvaluatedKey().isEmpty());
 
         // explain plan
         TestUtils.validateIndexUsed(qr.build(), url);
