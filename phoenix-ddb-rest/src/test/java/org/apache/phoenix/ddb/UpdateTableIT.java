@@ -372,7 +372,9 @@ public class UpdateTableIT {
                 utre.tableDescription().streamSpecification().streamEnabled());
         Assert.assertEquals(ddbUpdateResponse.tableDescription().streamSpecification().streamViewType(),
                 utre.tableDescription().streamSpecification().streamViewType());
-        Assert.assertEquals(ddbUpdateResponse.tableDescription().globalSecondaryIndexes().get(0).indexStatus().toString(),
+        // we return CREATING for both CREATE_DISABLE and BUILDING
+        // localddb will return ACTIVE almost immediately but we cannot tell when exactly
+        Assert.assertEquals("CREATING",
                 utre.tableDescription().globalSecondaryIndexes().get(0).indexStatus().toString());
 
         // describe table shows stream enabled and index created
@@ -386,7 +388,9 @@ public class UpdateTableIT {
                 describeTableResponse.table().streamSpecification().streamEnabled());
         Assert.assertEquals(ddbDescribeTableResponse.table().streamSpecification().streamViewType(),
                 describeTableResponse.table().streamSpecification().streamViewType());
-        Assert.assertEquals(ddbDescribeTableResponse.table().globalSecondaryIndexes().get(0).indexStatus().toString(),
+        // we return CREATING for both CREATE_DISABLE and BUILDING
+        // localddb will return ACTIVE almost immediately but we cannot tell when exactly
+        Assert.assertEquals("CREATING",
                 describeTableResponse.table().globalSecondaryIndexes().get(0).indexStatus().toString());
 
         // merges should be disabled for both table and index after enabling streams
