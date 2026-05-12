@@ -155,6 +155,7 @@ public class ApiMetadata {
     public static final String OLD_IMAGE = "OldImage";
     public static final String KEYS = "Keys";
     public static final String SIZE_BYTES = "SizeBytes";
+    public static final String EVENT_ID = "eventID";
     public static final String USER_IDENTITY = "userIdentity";
     public static final String TYPE = "Type";
     public static final String PRINCIPAL_ID = "PrincipalId";

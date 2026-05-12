@@ -8,6 +8,10 @@ import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTableKey;
 import org.apache.phoenix.util.CDCUtil;
 
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -187,6 +191,26 @@ public class DdbAdapterCdcUtils {
      */
     public static String getSequenceNumber(long timestamp, int offset) {
         return timestamp + String.format("%0" + OFFSET_LENGTH + "d", offset);
+    }
+
+    /**
+     * Generate a globally unique, deterministic eventID for a change stream record.
+     * Formula: md5Hex(tableName + "|" + partitionId + "|" + sequenceNumber)
+     *
+     * @param tableName the table name from the shard iterator
+     * @param partitionId the partition (shard) ID
+     * @param sequenceNumber the per-event sequence number
+     * @return 32-char lowercase hex string
+     */
+    public static String getEventId(String tableName, String partitionId, String sequenceNumber) {
+        try {
+            String input = tableName + "|" + partitionId + "|" + sequenceNumber;
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return String.format("%032x", new BigInteger(1, digest));
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("MD5 algorithm not available", e);
+        }
     }
 
     /**

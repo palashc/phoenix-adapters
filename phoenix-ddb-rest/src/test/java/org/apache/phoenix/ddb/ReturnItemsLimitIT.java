@@ -508,7 +508,7 @@ public class ReturnItemsLimitIT {
         // Verify that both services returned the same number of records
         Assert.assertEquals("Phoenix and DynamoDB should return same number of records",
                 ddbAllResponses.size(), phoenixAllResponses.size());
-        TestUtils.validateRecords(ddbAllResponses, phoenixAllResponses);
+        TestUtils.validateRecords(phoenixAllResponses, ddbAllResponses);
     }
 
     /**

@@ -23,8 +23,10 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.hadoop.hbase.HBaseConfiguration;
@@ -223,7 +225,7 @@ public class TestUtils {
     }
 
     /**
-     * Validate change records.
+     * Validate change records. Ensure first argument is Phoenix records.
      */
     public static void validateRecords(List<Record> phoenixRecords, List<Record> dynamoRecords) {
         Assert.assertEquals("Stream record counts should match between Phoenix and DynamoDB",
@@ -250,6 +252,36 @@ public class TestUtils {
             Assert.assertTrue("Phoenix record size should be greater than 0 for record " + i,
                     pr.dynamodb().sizeBytes() > 0);
         }
+        assertEventIdsUnique(phoenixRecords);
+    }
+
+    /**
+     * Assert that eventIDs are present, well-formed, and unique across distinct events.
+     * Records with the same sequenceNumber (re-read via AT_SEQUENCE_NUMBER) must produce
+     * the same eventID (deterministic). Records with different sequenceNumbers must produce
+     * different eventIDs (unique).
+     */
+    public static void assertEventIdsUnique(List<Record> records) {
+        // First pass: build seqNum -> eventID map, verifying format
+        Map<String, String> seqToEventId = new HashMap<>();
+        for (Record record : records) {
+            Assert.assertNotNull("eventID must be present", record.eventID());
+            Assert.assertTrue("eventID must be 32-char hex",
+                    record.eventID().matches("[0-9a-f]{32}"));
+            String seqNum = record.dynamodb().sequenceNumber();
+            seqToEventId.put(seqNum, record.eventID());
+        }
+
+        // Second pass: verify determinism and uniqueness
+        Set<String> seenEventIds = new HashSet<>();
+        for (Record record : records) {
+            String seqNum = record.dynamodb().sequenceNumber();
+            Assert.assertEquals("eventID must be stable for same sequenceNumber",
+                    seqToEventId.get(seqNum), record.eventID());
+            seenEventIds.add(record.eventID());
+        }
+        Assert.assertEquals("eventIDs must be unique across distinct events",
+                seqToEventId.size(), seenEventIds.size());
     }
 
     /**

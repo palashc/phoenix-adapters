@@ -20,7 +20,6 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -88,8 +87,9 @@ public class GetRecordsService {
                     lastTs = ts;
                     lastOffset=0;
                 }
-                record = getStreamRecord(rs, pIter.getStreamType(), pkCols,
-                        DdbAdapterCdcUtils.getSequenceNumber(lastTs, lastOffset));
+                String seqNum = DdbAdapterCdcUtils.getSequenceNumber(lastTs, lastOffset);
+                record = getStreamRecord(rs, pIter.getStreamType(), pkCols, seqNum,
+                        pIter.getTableName(), pIter.getPartitionId());
                 records.add(record);
                 count++;
                 bytesSize +=
@@ -156,7 +156,8 @@ public class GetRecordsService {
      * rs --> timestamp, pk1, (pk2), cdcJson
      */
     private static Map<String, Object> getStreamRecord(ResultSet rs, String streamType, List<PColumn> pkCols,
-                                          String seqNum) throws SQLException, JsonProcessingException {
+                                          String seqNum, String tableName, String partitionId)
+            throws SQLException, JsonProcessingException {
         Map<String, Object> streamRecord = new HashMap<>();
         streamRecord.put(ApiMetadata.STREAM_VIEW_TYPE, streamType);
         streamRecord.put(ApiMetadata.SEQUENCE_NUMBER, seqNum);
@@ -211,6 +212,7 @@ public class GetRecordsService {
         } else {
             record.put(ApiMetadata.EVENT_NAME, "MODIFY");
         }
+        record.put(ApiMetadata.EVENT_ID, DdbAdapterCdcUtils.getEventId(tableName, partitionId, seqNum));
         return record;
     }
 }

@@ -486,5 +486,10 @@ public class GetRecordsIT {
         Assert.assertEquals(ddbRecord.dynamodb().newImage(), phoenixRecord.dynamodb().newImage());
         Assert.assertTrue(ddbRecord.dynamodb().sizeBytes() > 0);
         Assert.assertTrue(phoenixRecord.dynamodb().sizeBytes() > 0);
+        // eventID must be present and be a 32-char hex string
+        Assert.assertNotNull("eventID must be present", phoenixRecord.eventID());
+        Assert.assertTrue("eventID must be 32-char hex",
+                phoenixRecord.eventID().matches("[0-9a-f]{32}"));
     }
+
 }
