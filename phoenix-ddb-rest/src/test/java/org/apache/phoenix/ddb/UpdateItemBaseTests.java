@@ -211,6 +211,239 @@ public class UpdateItemBaseTests {
     }
 
     /**
+     * SET: list_append against an existing list attribute path, plus a parallel
+     * "create-or-append" using if_not_exists for a previously-missing list, plus a
+     * subsequent re-apply that exercises both the existing-path operand and a literal
+     * operand.
+     */
+    @Test(timeout = 120000)
+    public void testListAppend() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+
+        Map<String, AttributeValue> key = getKey();
+
+        // First update: create NewList via if_not_exists, append literal items to it.
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression(
+                "SET #newList = list_append(if_not_exists(#newList, :empty), :items1)");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#newList", "NewList");
+        uir1.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":empty", AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        exprAttrVal1.put(":items1", AttributeValue.builder().l(
+                AttributeValue.builder().s("a").build(),
+                AttributeValue.builder().s("b").build()).build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        dynamoDbClient.updateItem(uir1.build());
+        phoenixDBClientV2.updateItem(uir1.build());
+
+        validateItem(tableName, key);
+
+        // Second update: append more items to the now-existing list (path operand + literal).
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET #newList = list_append(#newList, :items2)");
+        uir2.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":items2", AttributeValue.builder().l(
+                AttributeValue.builder().s("c").build(),
+                AttributeValue.builder().s("d").build()).build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        dynamoDbClient.updateItem(uir2.build());
+        phoenixDBClientV2.updateItem(uir2.build());
+
+        validateItem(tableName, key);
+
+        // Third update: prepend (literal first, path second).
+        // After this, the final list order is [z, a, b, c, d] — the literal is prepended.
+        UpdateItemRequest.Builder uir3 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir3.updateExpression("SET #newList = list_append(:items3, #newList)");
+        uir3.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal3 = new HashMap<>();
+        exprAttrVal3.put(":items3", AttributeValue.builder().l(
+                AttributeValue.builder().s("z").build()).build());
+        uir3.expressionAttributeValues(exprAttrVal3);
+        dynamoDbClient.updateItem(uir3.build());
+        phoenixDBClientV2.updateItem(uir3.build());
+
+        validateItem(tableName, key);
+    }
+
+    /**
+     * Create-or-append where the same operation is invoked twice with an overlapping
+     * payload, leaving duplicates in the resulting list (list_append preserves order
+     * and does not de-duplicate).
+     */
+    @Test(timeout = 120000)
+    public void testListAppendCreateOrAppendWithDuplicates() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression(
+                "SET #newList = list_append(if_not_exists(#newList, :empty), :items)");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#newList", "NewList");
+        uir.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":empty",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        // payload contains an internal duplicate ("a" twice) and is then re-applied to itself.
+        exprAttrVal.put(":items", AttributeValue.builder().l(
+                AttributeValue.builder().s("a").build(),
+                AttributeValue.builder().s("b").build(),
+                AttributeValue.builder().s("a").build()).build());
+        uir.expressionAttributeValues(exprAttrVal);
+
+        // First apply: NewList does not exist; create it via if_not_exists fallback and
+        // append the literal payload, yielding [a, b, a].
+        dynamoDbClient.updateItem(uir.build());
+        phoenixDBClientV2.updateItem(uir.build());
+        validateItem(tableName, key);
+
+        // Second apply: NewList now exists; append the same literal payload again,
+        // yielding [a, b, a, a, b, a]. Confirms list_append preserves duplicates and
+        // is not idempotent.
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(
+                uir.returnValues(ALL_NEW).build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(
+                uir.returnValues(ALL_NEW).build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+
+        AttributeValue finalList = phoenixResult.attributes().get("NewList");
+        Assert.assertNotNull("NewList should be present in returned attributes", finalList);
+        Assert.assertEquals("list_append preserves order and duplicates",
+                java.util.Arrays.asList("a", "b", "a", "a", "b", "a"),
+                finalList.l().stream().map(AttributeValue::s).collect(java.util.stream.Collectors.toList()));
+
+        validateItem(tableName, key);
+    }
+
+    /**
+     * Prepend variant: list_append with a literal list as the first operand and an
+     * if_not_exists fallback as the second operand. New items end up before the
+     * existing-or-fallback list.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendLiteralAndIfNotExists() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+
+        Map<String, AttributeValue> key = getKey();
+
+        // First apply: NewList does not exist, so if_not_exists falls back to []. The
+        // result is the literal :items prepended to that empty list -> [a, b].
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression(
+                "SET #newList = list_append(:items1, if_not_exists(#newList, :empty))");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#newList", "NewList");
+        uir1.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":empty",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        exprAttrVal1.put(":items1", AttributeValue.builder().l(
+                AttributeValue.builder().s("a").build(),
+                AttributeValue.builder().s("b").build()).build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        dynamoDbClient.updateItem(uir1.build());
+        phoenixDBClientV2.updateItem(uir1.build());
+        validateItem(tableName, key);
+
+        // Second apply: NewList now exists; literal :items2 is prepended in front of it.
+        // Result: [c, d, a, b].
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression(
+                "SET #newList = list_append(:items2, if_not_exists(#newList, :empty))");
+        uir2.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":empty",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        exprAttrVal2.put(":items2", AttributeValue.builder().l(
+                AttributeValue.builder().s("c").build(),
+                AttributeValue.builder().s("d").build()).build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir2.returnValues(ALL_NEW).build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir2.returnValues(ALL_NEW).build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+
+        AttributeValue finalList = phoenixResult.attributes().get("NewList");
+        Assert.assertNotNull("NewList should be present in returned attributes", finalList);
+        Assert.assertEquals("literal-first list_append prepends to existing list",
+                java.util.Arrays.asList("c", "d", "a", "b"),
+                finalList.l().stream().map(AttributeValue::s)
+                        .collect(java.util.stream.Collectors.toList()));
+
+        validateItem(tableName, key);
+    }
+
+    /**
+     * Create-or-append a list while atomically incrementing a counter in the same SET
+     * clause, gated on an updateCounter condition expression.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendWithIfNotExistsAndCounterIncrement() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+
+        Map<String, AttributeValue> key = getKey();
+
+        // Iteration 1: events does not exist; updateCounter starts unset, so initialize it
+        // first via a plain SET so the condition expression can reference it deterministically.
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET updateCounter = :zero");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":zero", AttributeValue.builder().n("0").build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        // Iteration 2: list_append(if_not_exists(events, :empty), :evts1) + counter increment,
+        // gated on updateCounter = 0.
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression(
+                "SET events = list_append(if_not_exists(events, :empty_list), :new_evts), "
+                        + "updateCounter = updateCounter + :one");
+        uir1.conditionExpression("updateCounter = :expected");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":empty_list",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        exprAttrVal1.put(":new_evts", AttributeValue.builder().l(
+                AttributeValue.builder().s("ev1").build(),
+                AttributeValue.builder().s("ev2").build()).build());
+        exprAttrVal1.put(":one", AttributeValue.builder().n("1").build());
+        exprAttrVal1.put(":expected", AttributeValue.builder().n("0").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        dynamoDbClient.updateItem(uir1.build());
+        phoenixDBClientV2.updateItem(uir1.build());
+
+        validateItem(tableName, key);
+
+        // Iteration 3: append more events; gated on the post-iter-2 counter value.
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        // Extra whitespace around closing paren and comma to verify parser tolerance.
+        uir2.updateExpression(
+                "SET events = list_append(if_not_exists(events, :empty_list), :new_evts  )   , "
+                        + "updateCounter = updateCounter + :one");
+        uir2.conditionExpression("updateCounter = :expected");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":empty_list",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        exprAttrVal2.put(":new_evts", AttributeValue.builder().l(
+                AttributeValue.builder().s("ev3").build()).build());
+        exprAttrVal2.put(":one", AttributeValue.builder().n("1").build());
+        exprAttrVal2.put(":expected", AttributeValue.builder().n("1").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        dynamoDbClient.updateItem(uir2.build());
+        phoenixDBClientV2.updateItem(uir2.build());
+
+        validateItem(tableName, key);
+    }
+
+    /**
      * REMOVE - Removes one or more attributes from an item.
      */
     @Test(timeout = 120000)

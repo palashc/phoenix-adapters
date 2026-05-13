@@ -17,6 +17,7 @@
  */
 package org.apache.phoenix.ddb;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -244,6 +245,422 @@ public class UpdateExpressionConversionTest {
     Assert.assertEquals(RawBsonDocument.parse(expectedBsonUpdateExpression),
             UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
                     getComparisonValuesMap()));
+  }
+
+  @Test
+  public void testListAppendPathAndLiteral() {
+    String ddbUpdateExp = "SET myList = list_append(myList, :listVal)";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"myList\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        \"myList\",\n" +
+            "        [\"c\", \"d\"]\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  @Test
+  public void testListAppendLiteralAndPath() {
+    String ddbUpdateExp = "SET myList = list_append(:listVal, myList)";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"myList\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        [\"c\", \"d\"],\n" +
+            "        \"myList\"\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  @Test
+  public void testListAppendBothLiterals() {
+    String ddbUpdateExp = "SET myList = list_append(:listVal, :listVal2)";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"myList\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        [\"c\", \"d\"],\n" +
+            "        [\"e\", \"f\"]\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  /**
+   * Canonical create-or-append: if the target list does not exist, fall back to an empty
+   * list as the first operand and then append the new literal items.
+   */
+  @Test
+  public void testListAppendWithIfNotExists() {
+    String ddbUpdateExp = "SET newQueue = list_append(if_not_exists(newQueue, :emptyList), :listVal)";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"newQueue\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        {\n" +
+            "          \"$IF_NOT_EXISTS\": {\n" +
+            "            \"newQueue\": []\n" +
+            "          }\n" +
+            "        },\n" +
+            "        [\"c\", \"d\"]\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  /**
+   * list_append combined with arithmetic and a remove in the same expression.
+   */
+  @Test
+  public void testListAppendMixedWithArithmeticAndRemove() {
+    String ddbUpdateExp =
+            "SET myList = list_append(myList, :listVal), counter = counter + :one "
+                    + "REMOVE oldField";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"myList\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        \"myList\",\n" +
+            "        [\"c\", \"d\"]\n" +
+            "      ]\n" +
+            "    },\n" +
+            "    \"counter\": {\n" +
+            "      \"$ADD\": [\n" +
+            "        \"counter\",\n" +
+            "        1\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  },\n" +
+            "  \"$UNSET\": {\n" +
+            "    \"oldField\": null\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  /**
+   * Nested document path on the LHS and as the path operand.
+   */
+  @Test
+  public void testListAppendNestedPath() {
+    String ddbUpdateExp = "SET nested.queue = list_append(nested.queue, :listVal)";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"nested.queue\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        \"nested.queue\",\n" +
+            "        [\"c\", \"d\"]\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  /**
+   * if_not_exists as the SECOND operand (literal first). This prepends the new items
+   * before the existing-or-fallback list.
+   */
+  @Test
+  public void testListAppendLiteralAndIfNotExists() {
+    String ddbUpdateExp = "SET newQueue = list_append(:listVal, if_not_exists(newQueue, :emptyList))";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"newQueue\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        [\"c\", \"d\"],\n" +
+            "        {\n" +
+            "          \"$IF_NOT_EXISTS\": {\n" +
+            "            \"newQueue\": []\n" +
+            "          }\n" +
+            "        }\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  /**
+   * Create-or-append a list while atomically incrementing a counter in the same SET clause.
+   */
+  @Test
+  public void testListAppendWithIfNotExistsAndCounterIncrement() {
+    String ddbUpdateExp =
+            "SET events = list_append(if_not_exists(events, :empty_list), :new_evts), "
+                    + "updateCounter = updateCounter + :one";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"events\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        {\n" +
+            "          \"$IF_NOT_EXISTS\": {\n" +
+            "            \"events\": []\n" +
+            "          }\n" +
+            "        },\n" +
+            "        [\"ev1\", \"ev2\"]\n" +
+            "      ]\n" +
+            "    },\n" +
+            "    \"updateCounter\": {\n" +
+            "      \"$ADD\": [\n" +
+            "        \"updateCounter\",\n" +
+            "        1\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Map<String, AttributeValue> attributeMap = new HashMap<>();
+    attributeMap.put(":empty_list",
+            AttributeValue.builder().l(Collections.emptyList()).build());
+    attributeMap.put(":new_evts", AttributeValue.builder().l(
+            AttributeValue.builder().s("ev1").build(),
+            AttributeValue.builder().s("ev2").build()).build());
+    attributeMap.put(":one", AttributeValue.builder().n("1").build());
+    BsonDocument values = DdbAttributesToBsonDocument.getRawBsonDocument(attributeMap);
+
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp, values));
+  }
+
+  /**
+   * Both operands of list_append are if_not_exists. Regression test for the
+   * paren-counting splitter: there are top-level commas at depth 1 followed by
+   * another open-paren on each side, which the old regex-based splitter could not
+   * handle.
+   */
+  @Test
+  public void testListAppendBothOperandsAreIfNotExists() {
+    String ddbUpdateExp =
+            "SET merged = list_append(if_not_exists(left, :emptyList), if_not_exists(right, :emptyList))";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"merged\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        { \"$IF_NOT_EXISTS\": { \"left\":  [] } },\n" +
+            "        { \"$IF_NOT_EXISTS\": { \"right\": [] } }\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    getListAppendComparisonValuesMap()));
+  }
+
+  /**
+   * Canonical counter-init pattern: increment a counter that may not exist yet, using
+   * if_not_exists as one of the arithmetic operands. Common DDB usage but previously
+   * only covered by IT tests.
+   */
+  @Test
+  public void testArithmeticWithIfNotExistsCounterIncrement() {
+    String ddbUpdateExp = "SET counter = if_not_exists(counter, :zero) + :one";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"counter\": {\n" +
+            "      \"$ADD\": [\n" +
+            "        { \"$IF_NOT_EXISTS\": { \"counter\": 0 } },\n" +
+            "        1\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Map<String, AttributeValue> attributeMap = new HashMap<>();
+    attributeMap.put(":zero", AttributeValue.builder().n("0").build());
+    attributeMap.put(":one", AttributeValue.builder().n("1").build());
+    BsonDocument values = DdbAttributesToBsonDocument.getRawBsonDocument(attributeMap);
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp, values));
+  }
+
+  /**
+   * Arithmetic with both operands being attribute paths (no placeholders, no
+   * if_not_exists).
+   */
+  @Test
+  public void testArithmeticPathPlusPath() {
+    String ddbUpdateExp = "SET total = subtotal + tax";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"total\": {\n" +
+            "      \"$ADD\": [\n" +
+            "        \"subtotal\",\n" +
+            "        \"tax\"\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+                    new BsonDocument()));
+  }
+
+  /**
+   * Subtract with placeholder first and attribute path second
+   * (e.g. {@code SET remaining = :limit - used}).
+   */
+  @Test
+  public void testArithmeticLiteralMinusPath() {
+    String ddbUpdateExp = "SET remaining = :limit - used";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"remaining\": {\n" +
+            "      \"$SUBTRACT\": [\n" +
+            "        100,\n" +
+            "        \"used\"\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    Map<String, AttributeValue> attributeMap = new HashMap<>();
+    attributeMap.put(":limit", AttributeValue.builder().n("100").build());
+    BsonDocument values = DdbAttributesToBsonDocument.getRawBsonDocument(attributeMap);
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp, values));
+  }
+
+  /**
+   * Multiple SET clauses interleaving every supported function/operator shape:
+   * plain placeholder, if_not_exists, arithmetic with if_not_exists, list_append,
+   * and a bare nested-path assignment.
+   */
+  @Test
+  public void testSetEveryShapeMixed() {
+    String ddbUpdateExp = "SET title = :newTitle, "
+            + "counter = if_not_exists(counter, :zero) + :one, "
+            + "total = price - :discount, "
+            + "events = list_append(if_not_exists(events, :emptyList), :newEvts), "
+            + "nested.path = :nestedVal";
+    String expected = "{\n" +
+            "  \"$SET\": {\n" +
+            "    \"title\": \"hello\",\n" +
+            "    \"counter\": {\n" +
+            "      \"$ADD\": [\n" +
+            "        { \"$IF_NOT_EXISTS\": { \"counter\": 0 } },\n" +
+            "        1\n" +
+            "      ]\n" +
+            "    },\n" +
+            "    \"total\": {\n" +
+            "      \"$SUBTRACT\": [\n" +
+            "        \"price\",\n" +
+            "        5\n" +
+            "      ]\n" +
+            "    },\n" +
+            "    \"events\": {\n" +
+            "      \"$LIST_APPEND\": [\n" +
+            "        { \"$IF_NOT_EXISTS\": { \"events\": [] } },\n" +
+            "        [\"e1\", \"e2\"]\n" +
+            "      ]\n" +
+            "    },\n" +
+            "    \"nested.path\": \"deep\"\n" +
+            "  }\n" +
+            "}";
+    Map<String, AttributeValue> attributeMap = new HashMap<>();
+    attributeMap.put(":newTitle", AttributeValue.builder().s("hello").build());
+    attributeMap.put(":zero", AttributeValue.builder().n("0").build());
+    attributeMap.put(":one", AttributeValue.builder().n("1").build());
+    attributeMap.put(":discount", AttributeValue.builder().n("5").build());
+    attributeMap.put(":emptyList",
+            AttributeValue.builder().l(Collections.emptyList()).build());
+    attributeMap.put(":newEvts", AttributeValue.builder().l(
+            AttributeValue.builder().s("e1").build(),
+            AttributeValue.builder().s("e2").build()).build());
+    attributeMap.put(":nestedVal", AttributeValue.builder().s("deep").build());
+    BsonDocument values = DdbAttributesToBsonDocument.getRawBsonDocument(attributeMap);
+    Assert.assertEquals(RawBsonDocument.parse(expected),
+            UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp, values));
+  }
+
+  @Test
+  public void testListAppendWrongArityOne() {
+    String ddbUpdateExp = "SET myList = list_append(:listVal)";
+    try {
+      UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+              getListAppendComparisonValuesMap());
+      Assert.fail("Expected RuntimeException for wrong arity (1 operand)");
+    } catch (RuntimeException e) {
+      Assert.assertTrue("Unexpected message: " + e.getMessage(),
+              e.getMessage().contains("list_append requires exactly 2 operands"));
+    }
+  }
+
+  @Test
+  public void testListAppendWrongArityThree() {
+    String ddbUpdateExp = "SET myList = list_append(:listVal, :listVal2, myList)";
+    try {
+      UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+              getListAppendComparisonValuesMap());
+      Assert.fail("Expected RuntimeException for wrong arity (3 operands)");
+    } catch (RuntimeException e) {
+      Assert.assertTrue("Unexpected message: " + e.getMessage(),
+              e.getMessage().contains("list_append requires exactly 2 operands"));
+    }
+  }
+
+  @Test
+  public void testListAppendMissingPlaceholder() {
+    String ddbUpdateExp = "SET myList = list_append(myList, :missing)";
+    try {
+      UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+              getListAppendComparisonValuesMap());
+      Assert.fail("Expected RuntimeException for missing placeholder");
+    } catch (RuntimeException e) {
+      Assert.assertTrue("Unexpected message: " + e.getMessage(),
+              e.getMessage().contains(":missing"));
+    }
+  }
+
+  @Test
+  public void testListAppendNonArrayPlaceholder() {
+    String ddbUpdateExp = "SET myList = list_append(myList, :notList)";
+    try {
+      UpdateExpressionDdbToBson.getBsonDocumentForUpdateExpression(ddbUpdateExp,
+              getListAppendComparisonValuesMap());
+      Assert.fail("Expected RuntimeException for non-list placeholder");
+    } catch (RuntimeException e) {
+      Assert.assertTrue("Unexpected message: " + e.getMessage(),
+              e.getMessage().contains("must resolve to a List type"));
+    }
+  }
+
+  private static BsonDocument getListAppendComparisonValuesMap() {
+    Map<String, AttributeValue> attributeMap = new HashMap<>();
+    attributeMap.put(":listVal", AttributeValue.builder().l(
+            AttributeValue.builder().s("c").build(),
+            AttributeValue.builder().s("d").build()).build());
+    attributeMap.put(":listVal2", AttributeValue.builder().l(
+            AttributeValue.builder().s("e").build(),
+            AttributeValue.builder().s("f").build()).build());
+    attributeMap.put(":emptyList",
+            AttributeValue.builder().l(Collections.emptyList()).build());
+    attributeMap.put(":one", AttributeValue.builder().n("1").build());
+    attributeMap.put(":notList", AttributeValue.builder().s("scalar").build());
+    return DdbAttributesToBsonDocument.getRawBsonDocument(attributeMap);
   }
 
   private static BsonDocument getComparisonValuesMap() {

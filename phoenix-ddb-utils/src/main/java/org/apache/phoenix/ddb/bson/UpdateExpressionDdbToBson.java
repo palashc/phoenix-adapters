@@ -37,11 +37,13 @@ public class UpdateExpressionDdbToBson {
   private static final String addRegExPattern = "ADD\\s+(.+?)(?=\\s+(SET|REMOVE|DELETE)\\b|$)";
   private static final String deleteRegExPattern = "DELETE\\s+(.+?)(?=\\s+(SET|REMOVE|ADD)\\b|$)";
   private static final String ifNotExistsPattern = "if_not_exists\\s*\\(\\s*([^,]+)\\s*,\\s*([^)]+)\\s*\\)";
+  private static final String listAppendPattern = "^list_append\\s*\\(\\s*(.+?)\\s*\\)$";
   private static final Pattern SET_PATTERN = Pattern.compile(setRegExPattern);
   private static final Pattern REMOVE_PATTERN = Pattern.compile(removeRegExPattern);
   private static final Pattern ADD_PATTERN = Pattern.compile(addRegExPattern);
   private static final Pattern DELETE_PATTERN = Pattern.compile(deleteRegExPattern);
   private static final Pattern IF_NOT_EXISTS_PATTERN = Pattern.compile(ifNotExistsPattern);
+  private static final Pattern LIST_APPEND_PATTERN = Pattern.compile(listAppendPattern);
 
   public static BsonDocument getBsonDocumentForUpdateExpression(
       final String updateExpression,
@@ -75,15 +77,17 @@ public class UpdateExpressionDdbToBson {
     BsonDocument bsonDocument = new BsonDocument();
     if (!setString.isEmpty()) {
       BsonDocument setBsonDoc = new BsonDocument();
-      // split by comma only if comma is not within ()
-      String[] setExpressions = setString.split(",(?![^()]*+\\))");
+      // Split on top-level commas only (commas inside any depth of parens are skipped).
+      String[] setExpressions = splitTopLevelCommas(setString);
       for (int i = 0; i < setExpressions.length; i++) {
         String setExpression = setExpressions[i].trim();
         String[] keyVal = setExpression.split("\\s*=\\s*");
         if (keyVal.length == 2) {
           String attributeKey = keyVal[0].trim();
           String attributeVal = keyVal[1].trim();
-          if (attributeVal.contains("+") || attributeVal.contains("-")) {
+          if (attributeVal.startsWith("list_append")) {
+            setBsonDoc.put(attributeKey, getListAppendDoc(attributeVal, comparisonValue));
+          } else if (attributeVal.contains("+") || attributeVal.contains("-")) {
             setBsonDoc.put(attributeKey, getArithmeticDoc(attributeVal, comparisonValue));
           } else if (attributeVal.startsWith("if_not_exists")) {
             setBsonDoc.put(attributeKey, getIfNotExistsDoc(attributeVal, comparisonValue));
@@ -162,7 +166,7 @@ public class UpdateExpressionDdbToBson {
           operand = operand.trim();
           if (operand.startsWith("if_not_exists")) {
               bsonOperands.add(getIfNotExistsDoc(operand, comparisonValue));
-          } else if (operand.startsWith(":") || operand.startsWith("$") || operand.startsWith("#")) {
+          } else if (operand.startsWith(":")) {
               BsonValue bsonValue = comparisonValue.get(operand);
               if (!bsonValue.isNumber() && !bsonValue.isDecimal128()) {
                   throw new IllegalArgumentException(
@@ -191,5 +195,88 @@ public class UpdateExpressionDdbToBson {
       } else {
           throw new RuntimeException("Invalid format for if_not_exists(path, value)");
       }
+  }
+
+  private static BsonDocument getListAppendDoc(String expr, BsonDocument comparisonValue) {
+      Matcher m = LIST_APPEND_PATTERN.matcher(expr);
+      if (!m.find()) {
+          throw new IllegalArgumentException(
+                  "Invalid format for list_append(operand1, operand2): " + expr);
+      }
+      String inner = m.group(1).trim();
+      // Split on top-level commas only (commas inside any depth of parens are skipped).
+      String[] operands = splitTopLevelCommas(inner);
+      if (operands.length != 2) {
+          throw new IllegalArgumentException(
+                  "list_append requires exactly 2 operands, got " + operands.length
+                          + " in: " + expr);
+      }
+      BsonArray bsonOperands = new BsonArray();
+      for (String operand : operands) {
+          bsonOperands.add(resolveListAppendOperand(operand.trim(), comparisonValue));
+      }
+      BsonDocument listAppendDoc = new BsonDocument();
+      listAppendDoc.put("$LIST_APPEND", bsonOperands);
+      return listAppendDoc;
+  }
+
+  private static BsonValue resolveListAppendOperand(String operand,
+                                                    BsonDocument comparisonValue) {
+      if (operand.startsWith("if_not_exists")) {
+          BsonDocument ifNotExistsDoc = getIfNotExistsDoc(operand, comparisonValue);
+          // Validate that the fallback value inside if_not_exists is a list, matching
+          // the client-side validation already done for literal placeholders.
+          BsonDocument inner = ifNotExistsDoc.getDocument("$IF_NOT_EXISTS");
+          BsonValue fallback = inner.values().iterator().next();
+          if (fallback != null && !fallback.isNull() && !fallback.isArray()) {
+              throw new IllegalArgumentException(
+                      "if_not_exists fallback inside list_append must resolve to a List type"
+                              + " but got: " + operand);
+          }
+          return ifNotExistsDoc;
+      } else if (operand.matches("^list_append\\s*\\(.*")) {
+          throw new IllegalArgumentException(
+                  "Nested list_append is not supported as an operand: " + operand);
+      } else if (operand.startsWith(":")) {
+          BsonValue bsonValue = comparisonValue.get(operand);
+          if (bsonValue == null) {
+              throw new IllegalArgumentException(
+                      "Operand " + operand
+                              + " not found in expression attribute values for list_append");
+          }
+          if (!bsonValue.isArray()) {
+              throw new IllegalArgumentException(
+                      "Operand " + operand + " for list_append must resolve to a List type");
+          }
+          return bsonValue;
+      } else {
+          // bare attribute path (e.g. myList, nested.queue, matrix[0])
+          return new BsonString(operand);
+      }
+  }
+
+  /**
+   * Split the given string on commas that are at paren-depth 0. Commas inside any
+   * level of {@code (...)} are preserved. This correctly handles arbitrarily nested
+   * function calls such as {@code list_append(:v, if_not_exists(a, :empty))} and
+   * {@code if_not_exists(a, :v), b = b + :n} at the SET-clause level.
+   */
+  private static String[] splitTopLevelCommas(String s) {
+      java.util.List<String> parts = new java.util.ArrayList<>();
+      int depth = 0;
+      int last = 0;
+      for (int i = 0; i < s.length(); i++) {
+          char c = s.charAt(i);
+          if (c == '(') {
+              depth++;
+          } else if (c == ')') {
+              depth--;
+          } else if (c == ',' && depth == 0) {
+              parts.add(s.substring(last, i));
+              last = i + 1;
+          }
+      }
+      parts.add(s.substring(last));
+      return parts.toArray(new String[0]);
   }
 }

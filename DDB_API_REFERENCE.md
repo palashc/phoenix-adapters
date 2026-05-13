@@ -899,6 +899,10 @@ Modifies specific attributes of an existing item (or creates it if using `SET` o
 **UpdateExpression syntax:**
 ```
 SET #name = :newName, age = :newAge
+SET counter = counter + :increment, score = score - :penalty
+SET title = if_not_exists(title, :defaultTitle)
+SET events = list_append(events, :newEvents)
+SET queue = list_append(if_not_exists(queue, :empty), :newItems)
 REMOVE obsolete_field
 ADD view_count :increment
 DELETE tags :tagsToRemove
@@ -909,6 +913,11 @@ Supported clauses:
 - `REMOVE` -- Remove attributes
 - `ADD` -- Add to number or add elements to a set
 - `DELETE` -- Remove elements from a set
+
+Supported `SET` functions and operators:
+- `+` / `-` -- arithmetic on numeric attributes (e.g. `counter = counter + :n`)
+- `if_not_exists(path, :fallback)` -- use existing value if present, otherwise fall back
+- `list_append(operand1, operand2)` -- concatenate two lists. Each operand may be a literal list placeholder (e.g. `:newItems`), an attribute path (e.g. `events`, `nested.queue`), or `if_not_exists(path, :emptyList)`. Both operands must resolve to a list; exactly two operands are required; nested `list_append(list_append(...), ...)` is not supported.
 
 **Legacy AttributeUpdates format:**
 ```json

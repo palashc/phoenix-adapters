@@ -529,6 +529,153 @@ public class UpdateExpressionValidationIT {
                 "DELETE from set same type");
     }
 
+    // list_append Operation Tests
+
+    /**
+     * list_append against an existing list attribute path with a literal list operand.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendExistingList() {
+        Map<String, AttributeValue> item = getKey();
+        item.put("a", AttributeValue.builder()
+                .l(AttributeValue.builder().s("x").build()).build());
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":val", AttributeValue.builder().l(
+                AttributeValue.builder().s("y").build(),
+                AttributeValue.builder().s("z").build()).build());
+
+        testUpdateExpressionSuccess(tableName, "SET a = list_append(a, :val)", null,
+                expressionAttributeValues, "list_append append literal to existing list");
+    }
+
+    /**
+     * list_append with if_not_exists fallback when the target attribute is missing.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendIfNotExistsMissing() {
+        Map<String, AttributeValue> item = getKey();
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":empty",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        expressionAttributeValues.put(":val", AttributeValue.builder().l(
+                AttributeValue.builder().s("y").build()).build());
+
+        testUpdateExpressionSuccess(tableName,
+                "SET a = list_append(if_not_exists(a, :empty), :val)", null,
+                expressionAttributeValues, "list_append create-or-append on missing attribute");
+    }
+
+    /**
+     * if_not_exists as the SECOND operand (literal list first). This is the prepend
+     * variant of the canonical create-or-append pattern.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendLiteralAndIfNotExists() {
+        Map<String, AttributeValue> item = getKey();
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":empty",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        expressionAttributeValues.put(":val", AttributeValue.builder().l(
+                AttributeValue.builder().s("y").build()).build());
+
+        testUpdateExpressionSuccess(tableName,
+                "SET a = list_append(:val, if_not_exists(a, :empty))", null,
+                expressionAttributeValues, "list_append with literal first and if_not_exists second");
+    }
+
+    /**
+     * Both operands of list_append are literal value placeholders (no paths, no
+     * if_not_exists). Result should be the simple concatenation of the two literals.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendBothLiterals() {
+        Map<String, AttributeValue> item = getKey();
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":v1", AttributeValue.builder().l(
+                AttributeValue.builder().s("a").build(),
+                AttributeValue.builder().s("b").build()).build());
+        expressionAttributeValues.put(":v2", AttributeValue.builder().l(
+                AttributeValue.builder().s("c").build(),
+                AttributeValue.builder().s("d").build()).build());
+
+        testUpdateExpressionSuccess(tableName,
+                "SET combined = list_append(:v1, :v2)", null,
+                expressionAttributeValues, "list_append with two literal-list operands");
+    }
+
+    /**
+     * Both operands of list_append are if_not_exists.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendBothOperandsAreIfNotExists() {
+        // Seed item: 'leftList' exists, 'rightList' does not
+        Map<String, AttributeValue> item = getKey();
+        item.put("leftList", AttributeValue.builder()
+                .l(AttributeValue.builder().s("x").build()).build());
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":emptyLeft",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+        expressionAttributeValues.put(":emptyRight",
+                AttributeValue.builder().l(java.util.Collections.emptyList()).build());
+
+        testUpdateExpressionSuccess(tableName,
+                "SET merged = list_append("
+                        + "if_not_exists(leftList, :emptyLeft), "
+                        + "if_not_exists(rightList, :emptyRight))",
+                null, expressionAttributeValues,
+                "list_append with if_not_exists in both operand positions");
+    }
+
+    /**
+     * Nested list_append (list_append inside list_append) is not part of AWS DynamoDB's
+     * documented UpdateExpression grammar -- the only function permitted as an operand is
+     * if_not_exists. Both real DDB and the phoenix-adapter must reject it with HTTP 400.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendNestedRejected() {
+        Map<String, AttributeValue> item = getKey();
+        item.put("a", AttributeValue.builder()
+                .l(AttributeValue.builder().s("x").build()).build());
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":v1", AttributeValue.builder().l(
+                AttributeValue.builder().s("y").build()).build());
+        expressionAttributeValues.put(":v2", AttributeValue.builder().l(
+                AttributeValue.builder().s("z").build()).build());
+
+        testUpdateExpressionFailure(tableName,
+                "SET a = list_append(list_append(a, :v1), :v2)", null,
+                expressionAttributeValues, "nested list_append should be rejected");
+    }
+
+    /**
+     * list_append where the target path resolves to a non-list value should fail.
+     */
+    @Test(timeout = 120000)
+    public void testListAppendTargetNotList() {
+        Map<String, AttributeValue> item = getKey();
+        item.put("a", AttributeValue.builder().n("123").build());
+        putTestItem(tableName, item);
+
+        Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+        expressionAttributeValues.put(":val", AttributeValue.builder().l(
+                AttributeValue.builder().s("y").build()).build());
+
+        testUpdateExpressionFailure(tableName, "SET a = list_append(a, :val)", null,
+                expressionAttributeValues, "list_append on attribute that is not a list");
+    }
+
     private void putTestItem(String tableName, Map<String, AttributeValue> item) {
         PutItemRequest putRequest =
                 PutItemRequest.builder().tableName(tableName).item(item).build();
