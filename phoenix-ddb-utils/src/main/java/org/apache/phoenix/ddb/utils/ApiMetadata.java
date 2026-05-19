@@ -172,6 +172,7 @@ public class ApiMetadata {
     public static final String DELETE_TABLE = "DeleteTable";
     public static final String DESCRIBE_TABLE = "DescribeTable";
     public static final String DESCRIBE_CONTINUOUS_BACKUPS = "DescribeContinuousBackups";
+    public static final String UPDATE_CONTINUOUS_BACKUPS = "UpdateContinuousBackups";
     public static final String LIST_TABLES = "ListTables";
     public static final String UPDATE_TABLE = "UpdateTable";
     public static final String PUT_ITEM = "PutItem";

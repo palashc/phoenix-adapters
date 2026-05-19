@@ -7,6 +7,7 @@ public enum ApiOperation {
     DELETE_TABLE(ApiMetadata.DELETE_TABLE, "DeleteTable"),
     DESCRIBE_TABLE(ApiMetadata.DESCRIBE_TABLE, "DescribeTable"), DESCRIBE_CONTINUOUS_BACKUPS(
             ApiMetadata.DESCRIBE_CONTINUOUS_BACKUPS, "DescribeContinuousBackups"),
+    UPDATE_CONTINUOUS_BACKUPS(ApiMetadata.UPDATE_CONTINUOUS_BACKUPS, "UpdateContinuousBackups"),
     LIST_TABLES(ApiMetadata.LIST_TABLES, "ListTables"),
     UPDATE_TABLE(ApiMetadata.UPDATE_TABLE, "UpdateTable"),
     PUT_ITEM(ApiMetadata.PUT_ITEM, "PutItem"),

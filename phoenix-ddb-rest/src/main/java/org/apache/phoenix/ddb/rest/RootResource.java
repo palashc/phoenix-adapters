@@ -56,6 +56,7 @@ import org.apache.phoenix.ddb.service.PutItemService;
 import org.apache.phoenix.ddb.service.QueryService;
 import org.apache.phoenix.ddb.service.ScanService;
 import org.apache.phoenix.ddb.service.TTLService;
+import org.apache.phoenix.ddb.service.UpdateContinuousBackupsService;
 import org.apache.phoenix.ddb.service.UpdateItemService;
 import org.apache.phoenix.ddb.service.UpdateTableService;
 import org.apache.phoenix.ddb.service.exceptions.ConditionCheckFailedException;
@@ -135,6 +136,12 @@ public class RootResource {
                 case ApiMetadata.DESCRIBE_CONTINUOUS_BACKUPS: {
                     responseObject =
                             DescribeContinuousBackupsService.describeContinuousBackups(request,
+                                    jdbcConnectionUrl);
+                    break;
+                }
+                case ApiMetadata.UPDATE_CONTINUOUS_BACKUPS: {
+                    responseObject =
+                            UpdateContinuousBackupsService.updateContinuousBackups(request,
                                     jdbcConnectionUrl);
                     break;
                 }
