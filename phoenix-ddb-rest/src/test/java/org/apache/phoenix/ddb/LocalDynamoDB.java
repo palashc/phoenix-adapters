@@ -35,14 +35,14 @@ import java.net.URI;
  * Each instance of this service uses memory as a storage medium and is thus completely ephemeral;
  * no data will be persisted between stops and starts.
  */
-class LocalDynamoDB {
+public class LocalDynamoDB {
     private DynamoDBProxyServer server;
     private int port;
 
     /**
      * Start the local DynamoDb service and run in background
      */
-    void start() {
+    public void start() {
         port = getFreePort();
         String portString = Integer.toString(port);
 
@@ -55,13 +55,19 @@ class LocalDynamoDB {
     }
 
     /**
+     * HTTP endpoint of the running local DynamoDb. Only valid after {@link #start()}.
+     */
+    public String getEndpoint() {
+        return String.format("http://localhost:%d", port);
+    }
+
+    /**
      * Create a standard AWS v2 SDK client pointing to the local DynamoDb instance
      *
      * @return A DynamoDbClient pointing to the local DynamoDb instance
      */
-    DynamoDbClient createV2Client() {
-        String endpoint = String.format("http://localhost:%d", port);
-        return createV2Client(endpoint);
+    public DynamoDbClient createV2Client() {
+        return createV2Client(getEndpoint());
     }
 
     /**
@@ -85,9 +91,8 @@ class LocalDynamoDB {
      *
      * @return A DynamoDbStreamsClient pointing to the local DynamoDb instance
      */
-    DynamoDbStreamsClient createV2StreamsClient() {
-        String endpoint = String.format("http://localhost:%d", port);
-        return createV2StreamsClient(endpoint);
+    public DynamoDbStreamsClient createV2StreamsClient() {
+        return createV2StreamsClient(getEndpoint());
     }
 
     /**
@@ -109,7 +114,7 @@ class LocalDynamoDB {
     /**
      * Stops the local DynamoDb service and frees up resources it is using.
      */
-    void stop() {
+    public void stop() {
         try {
             server.stop();
         } catch (Exception e) {

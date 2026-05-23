@@ -1364,6 +1364,10 @@ Results from both queries are merged into a single response.
 
 Change streams allow you to capture item-level changes (inserts, updates, deletes) from a table. This is implemented using Phoenix's CDC (Change Data Capture) feature.
 
+### Consumer Compatibility
+
+The four stream APIs are compatible with the **Amazon Kinesis Client Library (KCL)** via the **DynamoDB Streams Kinesis Adapter**. A single `phoenix-ddb-rest` endpoint can serve both the stream source and KCL's lease table.
+
 ### Workflow
 
 ```
@@ -1822,6 +1826,7 @@ Each API operation tracks:
 | **Consumed capacity** | Actual capacity units                 | Always hardcoded `{ReadCapacityUnits: 1.0, WriteCapacityUnits: 1.0, CapacityUnits: 2.0}`    |
 | **Query/Scan limit** | Up to 1 MB per page                   | Capped at 100 items OR 1 MB, whichever comes first                                  |
 | **Stream shard iterators** | Expire after 15 minutes               | No automatic expiry                                                                         |
+| **KCL consumer compatibility** | KCL                                   | KCL compatible (via `dynamodb-streams-kinesis-adapter`)                                     |
 | **Item storage** | Native DynamoDB format                | BSON document in a single Phoenix column                                                    |
 | **Consistency** | Eventual + (Strong for local indexes) | Depends on Phoenix/HBase configuration                                                      |
 

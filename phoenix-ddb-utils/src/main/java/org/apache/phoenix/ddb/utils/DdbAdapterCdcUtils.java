@@ -61,7 +61,6 @@ public class DdbAdapterCdcUtils {
 
     // ShardId format: shardId-<partitionStartMs>-<32-char-hex-partition-id>
     public static final String SHARD_ID_PREFIX = "shardId-";
-    private static final String SHARD_ID_DELIM = "-";
     public static final String STREAM_LABEL_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.SSS";
     private static final String STREAM_LABEL_PARSE_PATTERN = "uuuu-MM-dd'T'HH:mm:ss.SSS";
     private static final DateTimeFormatter STREAM_LABEL_FORMATTER =
@@ -229,7 +228,7 @@ public class DdbAdapterCdcUtils {
      * @param partitionHex     HBase region encoded partition id (32-char lowercase hex)
      */
     public static String toShardId(long partitionStartMs, String partitionHex) {
-        return SHARD_ID_PREFIX + partitionStartMs + SHARD_ID_DELIM + partitionHex;
+        return PhoenixShardId.of(partitionStartMs, partitionHex).toExternalString();
     }
 
     /**
@@ -243,7 +242,9 @@ public class DdbAdapterCdcUtils {
     /**
      * Extract the bare HBase region encoded partition id from either the new
      * AWS-shaped {@code ShardId} ({@code shardId-<ms>-<hex>}) or a raw partition
-     * hex string.
+     * hex string. Dual-mode for backward compatibility with raw-hex callers; new
+     * code that knows it has an AWS-shaped shardId should use
+     * {@link PhoenixShardId#parse} directly.
      */
     public static String partitionIdFromShardId(String shardIdOrPartitionHex) {
         if (shardIdOrPartitionHex == null || shardIdOrPartitionHex.isEmpty()) {
@@ -252,13 +253,26 @@ public class DdbAdapterCdcUtils {
         if (!isShardId(shardIdOrPartitionHex)) {
             return shardIdOrPartitionHex;
         }
-        String body = shardIdOrPartitionHex.substring(SHARD_ID_PREFIX.length());
-        int dashIdx = body.indexOf(SHARD_ID_DELIM);
-        if (dashIdx < 0 || dashIdx == body.length() - 1) {
-            throw new IllegalArgumentException(
-                "ShardId missing partition hex segment: " + shardIdOrPartitionHex);
+        return PhoenixShardId.parse(shardIdOrPartitionHex).partitionId();
+    }
+
+    /**
+     * Extract the {@code partitionStartMs} half of an AWS-shaped {@code ShardId}
+     * ({@code shardId-<ms>-<hex>}). Used by {@code DescribeStream} pagination so the
+     * composite cursor {@code (startTime, partitionId)} can be reconstructed from a
+     * caller-supplied {@code ExclusiveStartShardId}.
+     *
+     * @return -1 when the input is a raw partition hex (no embedded timestamp),
+     *         the epoch-millis otherwise.
+     */
+    public static long partitionStartMsFromShardId(String shardIdOrPartitionHex) {
+        if (shardIdOrPartitionHex == null || shardIdOrPartitionHex.isEmpty()) {
+            throw new IllegalArgumentException("ShardId is required");
         }
-        return body.substring(dashIdx + 1);
+        if (!isShardId(shardIdOrPartitionHex)) {
+            return -1L;
+        }
+        return PhoenixShardId.parse(shardIdOrPartitionHex).startTimeMs();
     }
 
     private static long parseCreationDateTime(String creationDateTime, String streamArn) {

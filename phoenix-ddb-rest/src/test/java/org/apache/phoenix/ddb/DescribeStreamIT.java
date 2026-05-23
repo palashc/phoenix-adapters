@@ -358,6 +358,123 @@ public class DescribeStreamIT {
 
     }
 
+    /**
+     * Test Pagination contract introduced for KCL parity:
+     * <ul>
+     *   <li>Results are ordered by {@code (PARTITION_START_TIME, PARTITION_ID)} so a parent
+     *       always precedes its daughters in any page.</li>
+     *   <li>The cursor uses the composite {@code (startMs, partitionId)} encoded in the
+     *       shardId. Daughters are reachable via {@code ExclusiveStartShardId=parent.shardId}
+     *       even if the daughter's region hex sorts lexicographically before the parent's
+     *       — which broke under the old {@code PARTITION_ID > X} cursor.</li>
+     *   <li>{@code ParentShardId} is preserved on daughters even when they appear in a page
+     *       separate from the parent (cross-page backfill).</li>
+     * </ul>
+     */
+    @Test(timeout = 120000)
+    public void testDescribeStreamPaginationOrderAndParentLink() throws Exception {
+        String tableName = testName.getMethodName();
+        CreateTableRequest createTableRequest =
+                DDLTestUtils.getCreateTableRequest(tableName, "hashKey",
+                        ScalarAttributeType.S, "sortKey", ScalarAttributeType.N);
+        createTableRequest = DDLTestUtils.addStreamSpecToRequest(createTableRequest, "NEW_IMAGE");
+        phoenixDBClientV2.createTable(createTableRequest);
+
+        ListStreamsRequest lsr = ListStreamsRequest.builder().tableName(tableName).build();
+        String streamArn = phoenixDBStreamsClientV2.listStreams(lsr).streams().get(0).streamArn();
+        TestUtils.waitForStream(phoenixDBStreamsClientV2, streamArn);
+
+        // Three sequential splits to build a small tree (1 → 2 → 3 → 4 leaves, 3 closed parents).
+        String fullName = PhoenixUtils.getFullTableName(tableName, false);
+        try (Connection conn = DriverManager.getConnection(url)) {
+            TestUtils.splitTable(conn, fullName, Bytes.toBytes("m"));
+            TestUtils.splitTable(conn, fullName, Bytes.toBytes("g"));
+            TestUtils.splitTable(conn, fullName, Bytes.toBytes("s"));
+        }
+
+        // Pull all shards via unpaged DescribeStream to build the expected parent/child map.
+        StreamDescription allInOne = phoenixDBStreamsClientV2.describeStream(
+                DescribeStreamRequest.builder().streamArn(streamArn).build()).streamDescription();
+        Assert.assertEquals("Expected 7 shards (3 closed parents + 4 open leaves)",
+                7, allInOne.shards().size());
+
+        // (1) Ordering: a parent always appears before any shard that names it as ParentShardId.
+        List<String> orderedShardIds = new ArrayList<>();
+        for (Shard s : allInOne.shards()) {
+            orderedShardIds.add(s.shardId());
+        }
+        for (int i = 0; i < allInOne.shards().size(); i++) {
+            Shard s = allInOne.shards().get(i);
+            if (s.parentShardId() != null) {
+                int parentIdx = orderedShardIds.indexOf(s.parentShardId());
+                Assert.assertTrue(
+                        "Shard " + s.shardId() + " names parent " + s.parentShardId()
+                                + " that appears later in the response (parentIdx=" + parentIdx
+                                + ", childIdx=" + i + ") — ORDER BY broken",
+                        parentIdx >= 0 && parentIdx < i);
+            }
+        }
+
+        // (2) Per-shard cursor: walk through with limit=1 and verify every shard appears
+        // exactly once, in the same global order as the unpaged response.
+        List<Shard> paged = new ArrayList<>();
+        String cursor = null;
+        do {
+            StreamDescription page = phoenixDBStreamsClientV2.describeStream(
+                    DescribeStreamRequest.builder().streamArn(streamArn)
+                            .exclusiveStartShardId(cursor).limit(1).build()).streamDescription();
+            paged.addAll(page.shards());
+            cursor = page.lastEvaluatedShardId();
+        } while (cursor != null);
+        Assert.assertEquals("Paged total mismatch", allInOne.shards().size(), paged.size());
+        for (int i = 0; i < paged.size(); i++) {
+            Assert.assertEquals("Paged ordering diverges from unpaged at index " + i,
+                    allInOne.shards().get(i).shardId(), paged.get(i).shardId());
+        }
+
+        // (3) Cross-page parent link: every daughter's ParentShardId must still resolve to
+        // a shard in the paged response, even when parent and daughter land on different pages.
+        for (Shard s : paged) {
+            if (s.parentShardId() != null) {
+                boolean parentPresent = paged.stream()
+                        .anyMatch(p -> p.shardId().equals(s.parentShardId()));
+                Assert.assertTrue("Daughter " + s.shardId() + " references parent "
+                        + s.parentShardId() + " which is missing from the paged response",
+                        parentPresent);
+            }
+        }
+
+        // (4) Adapter-style retry: pick a closed parent, call DescribeStream with
+        // ExclusiveStartShardId = that parent's shardId, verify at least one daughter comes back.
+        // This is the exact failure mode the fix was for: under the old PARTITION_ID > X cursor,
+        // daughters whose region hex sorted lex-before the parent's were skipped.
+        Shard closedParentWithDaughter = null;
+        for (Shard s : allInOne.shards()) {
+            if (StringUtils.isEmpty(s.sequenceNumberRange().endingSequenceNumber())) {
+                continue;
+            }
+            boolean hasDaughter = allInOne.shards().stream()
+                    .anyMatch(d -> s.shardId().equals(d.parentShardId()));
+            if (hasDaughter) {
+                closedParentWithDaughter = s;
+                break;
+            }
+        }
+        Assert.assertNotNull("Expected at least one closed parent with a daughter",
+                closedParentWithDaughter);
+        final String parentShardId = closedParentWithDaughter.shardId();
+
+        StreamDescription afterParent = phoenixDBStreamsClientV2.describeStream(
+                DescribeStreamRequest.builder().streamArn(streamArn)
+                        .exclusiveStartShardId(parentShardId).build()).streamDescription();
+        boolean foundDaughterAfterParent = afterParent.shards().stream()
+                .anyMatch(d -> parentShardId.equals(d.parentShardId()));
+        Assert.assertTrue(
+                "ExclusiveStartShardId=" + parentShardId + " did not return any "
+                        + "daughter — pagination cursor regressed to lexical PARTITION_ID",
+                foundDaughterAfterParent);
+    }
+
     @Test(timeout = 120000)
     public void testEnableStreamAfterSplits() throws Exception {
         String tableName = testName.getMethodName();

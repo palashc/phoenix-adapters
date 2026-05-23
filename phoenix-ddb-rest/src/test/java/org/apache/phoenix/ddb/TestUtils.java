@@ -291,6 +291,37 @@ public class TestUtils {
     }
 
     /**
+     * Force SYSTEM.CATALOG materialization before tests start hitting Phoenix. On a fresh
+     * mini-cluster the very first connection can race the catalog-table create and surface
+     * as {@code PhoenixIOException: SYSTEM.CATALOG}; on a slow cluster the catalog itself
+     * may take several seconds to come up. Poll until ready or 30s elapses.
+     */
+    public static void awaitPhoenixReady(String jdbcUrl) {
+        final int maxAttempts = 30;
+        SQLException last = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try (Connection conn = DriverManager.getConnection(jdbcUrl)) {
+                return;
+            } catch (SQLException e) {
+                last = e;
+                if (attempt == 1 || attempt % 5 == 0) {
+                    LOGGER.warn("Phoenix readiness probe attempt {}/{} failed: {}",
+                            attempt, maxAttempts, e.toString());
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(ie);
+                }
+            }
+        }
+        throw new RuntimeException(
+                "Phoenix never became ready after " + maxAttempts + " attempts at " + jdbcUrl,
+                last);
+    }
+
+    /**
      * Split a table at the given split point.
      */
     public static void splitTable(Connection conn, String tableName, byte[] splitPoint)

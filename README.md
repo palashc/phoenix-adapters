@@ -19,6 +19,8 @@ By using REST Service, client applications already using any AWS SDKs to connect
 does not need to perform any code change. The client application only needs to update the REST
 endpoint.
 
+> **Production-ready and horizontally scalable.** The REST process is 100% stateless — all state lives in the underlying HBase cluster. Spawn as many instances (containers / VMs / pods) as you need and put any load balancer in front of them; no session affinity, no inter-instance coordination required.
+
 ![Alt text](src/images/phoenix_dynamodb_rest.jpeg)
 
 #### Supported DynamoDB APIs
