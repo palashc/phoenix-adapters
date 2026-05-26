@@ -517,6 +517,16 @@ public class TestUtils {
         }
     }
 
+    public static void validateCdcProps(String url, String tableName) throws SQLException {
+        String cdcFullName = PhoenixUtils.getFullTableName("CDC_" + tableName, false);
+        try (Connection conn = DriverManager.getConnection(url)) {
+            PhoenixConnection phoenixConnection = conn.unwrap(PhoenixConnection.class);
+            PTable cdc = phoenixConnection.getTable(
+                    new PTableKey(phoenixConnection.getTenantId(), cdcFullName));
+            Assert.assertEquals(60000, cdc.getUpdateCacheFrequency());
+        }
+    }
+
     public static void waitForIndexState(DynamoDbClient client, String tableName, String indexName,
             String expectedState) {
         DescribeTableRequest dtr = DescribeTableRequest.builder().tableName(tableName).build();

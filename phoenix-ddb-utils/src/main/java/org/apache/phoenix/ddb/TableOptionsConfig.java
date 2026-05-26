@@ -12,9 +12,11 @@ public class TableOptionsConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger(TableOptionsConfig.class);
     private static final String TABLE_CONFIG_FILE = "phoenix-table-options.properties";
     private static final String INDEX_CONFIG_FILE = "phoenix-index-options.properties";
+    private static final String UPDATE_CACHE_FREQUENCY_KEY = "UPDATE_CACHE_FREQUENCY";
 
     private static String tableOptionsString;
     private static String indexOptionsString;
+    private static String cdcOptionsString;
 
     /**
      * Initialize both table and index configurations at startup.
@@ -22,7 +24,8 @@ public class TableOptionsConfig {
     public static void initialize() throws IOException {
         tableOptionsString = buildOptionsString(TABLE_CONFIG_FILE, "table");
         indexOptionsString = buildOptionsString(INDEX_CONFIG_FILE, "index");
-        LOGGER.info("Initialized table and index configurations");
+        cdcOptionsString = buildCdcOptionsString(TABLE_CONFIG_FILE);
+        LOGGER.info("Initialized table, index, and CDC configurations");
     }
 
     /**
@@ -43,6 +46,28 @@ public class TableOptionsConfig {
             throw new IllegalStateException("Index Options Config not initialized.");
         }
         return indexOptionsString;
+    }
+
+    /**
+     * Get CDC options as formatted string for CREATE CDC statements.
+     */
+    public static String getCdcOptions() {
+        if (cdcOptionsString == null) {
+            throw new IllegalStateException("CDC Options Config not initialized.");
+        }
+        return cdcOptionsString;
+    }
+
+    /**
+     * Build CDC options string using UPDATE_CACHE_FREQUENCY from the table config.
+     */
+    private static String buildCdcOptionsString(String tableConfigFile) throws IOException {
+        Properties props = loadConfiguration(tableConfigFile, "cdc");
+        String updateCacheFrequency = props.getProperty(UPDATE_CACHE_FREQUENCY_KEY);
+        if (updateCacheFrequency == null) {
+            throw new IOException(UPDATE_CACHE_FREQUENCY_KEY + " not found in " + tableConfigFile);
+        }
+        return UPDATE_CACHE_FREQUENCY_KEY + "=" + updateCacheFrequency;
     }
 
     /**

@@ -315,6 +315,7 @@ public class CreateTableIT {
         }
         TestUtils.validateTableProps(url, tableName, false);
         TestUtils.validateTableProps(url, tableName + "_IDX1_" + tableName, true);
+        TestUtils.validateCdcProps(url, tableName);
     }
 
     @Test(timeout = 120000)

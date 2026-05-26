@@ -50,7 +50,7 @@ public class CreateTableService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CreateTableService.class);
 
-    private static final String CREATE_CDC_DDL = "CREATE CDC IF NOT EXISTS \"CDC_%s\" on %s";
+    private static final String CREATE_CDC_DDL = "CREATE CDC IF NOT EXISTS \"CDC_%s\" on %s %s";
     private static final String ALTER_TABLE_STREAM_TYPE_DDL =
             "ALTER TABLE %s set SCHEMA_VERSION = '%s'";
 
@@ -209,7 +209,8 @@ public class CreateTableService {
             if (StringUtils.isEmpty(streamType)) {
                 throw new ValidationException("STREAM_VIEW_TYPE attribute is required.");
             }
-            cdcDDLs.add(String.format(CREATE_CDC_DDL, tableName, PhoenixUtils.getFullTableName(tableName, true)));
+            cdcDDLs.add(String.format(CREATE_CDC_DDL, tableName,
+                    PhoenixUtils.getFullTableName(tableName, true), TableOptionsConfig.getCdcOptions()));
             cdcDDLs.add(String.format(ALTER_TABLE_STREAM_TYPE_DDL, PhoenixUtils.getFullTableName(tableName, true), streamType));
         }
         return cdcDDLs;
