@@ -215,7 +215,7 @@ Several open-source projects provide DynamoDB-compatible APIs on non-AWS infrast
 
 | Operation | Phoenix-Adapters | Alternator | ExtendDB |
 |---|:---:|:---:|:---:|
-| CreateTable / DeleteTable / DescribeTable / ListTables | ✅ | ✅ | ✅ |
+| CreateTable / DeleteTable / DescribeTable / ListTables / UpdateTable | ✅ | ✅ | ✅ |
 | PutItem / GetItem / DeleteItem / UpdateItem | ✅ | ✅ | ✅ |
 | Query / Scan | ✅ | ✅ | ✅ |
 | BatchGetItem / BatchWriteItem | ✅ | ✅ | ✅ |
@@ -243,20 +243,20 @@ Several open-source projects provide DynamoDB-compatible APIs on non-AWS infrast
 
 | | Phoenix-Adapters | Alternator | ExtendDB |
 |---|---|---|---|
-| **Horizontal scale** | Petabytes (HBase regions) | Petabytes (ScyllaDB vnodes) | Limited (PG vertical) |
+| **Horizontal scale** | Petabytes (HBase regions) | Petabytes (ScyllaDB vnodes) | Single node server (PG vertical) |
 | **Multi-instance safe** | ✅ Stateless tier | ✅ Native (peer-to-peer) | ❌ No coordination (documented gap) |
 | **Write distribution** | Across HBase region servers | Across ScyllaDB nodes | Single PG writer |
 | **Consistency** | Configurable (HBase) | Tunable (LOCAL_ONE / LOCAL_QUORUM) | Strong (PG default) |
-| **Operational complexity** | High (HBase + Phoenix + ZK) | Medium (ScyllaDB cluster) | Low (binary + PG) |
+| **Operational complexity** | Medium (HBase + Phoenix) | Medium (ScyllaDB cluster) | Low (binary + PG) |
 
 ### Design Philosophy
 
-| | Phoenix-Adapters | Alternator | ExtendDB |
-|---|---|---|---|
-| **Approach** | Many APIs → one backend | Embedded in storage engine | One API → pluggable backends |
-| **Expression evaluation** | Server-side (Phoenix UDFs) | Native C++ in storage layer | In-process Rust evaluator |
-| **Index implementation** | Phoenix UNCOVERED INDEX | ScyllaDB materialized views | Separate PG tables |
-| **Stream implementation** | Phoenix CDC | ScyllaDB CDC | Atomic with data writes (PG txn) |
+| | Phoenix-Adapters                 | Alternator | ExtendDB |
+|---|----------------------------------|---|---|
+| **Approach** | Many APIs → one backend          | Embedded in storage engine | One API → pluggable backends |
+| **Expression evaluation** | Server-side Phoenix functions       | Native C++ in storage layer | In-process Rust evaluator |
+| **Index implementation** | Phoenix Global Secondary Indexes | ScyllaDB materialized views | Separate PG tables |
+| **Stream implementation** | Phoenix CDC                      | ScyllaDB CDC | Atomic with data writes (PG txn) |
 
 ### When to Use What
 
