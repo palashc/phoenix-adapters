@@ -201,6 +201,10 @@ Logs are stored in the following locations:
 
 Several open-source projects provide DynamoDB-compatible APIs on non-AWS infrastructure. Here's how they compare:
 
+> _Analysis as of **2026-05-27**._
+
+### At a Glance
+
 | | **Phoenix-Adapters** | **ScyllaDB Alternator** | **ExtendDB** |
 |---|---|---|---|
 | **Storage Engine** | Apache Phoenix / HBase | ScyllaDB (embedded) | PostgreSQL |
