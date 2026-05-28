@@ -196,3 +196,76 @@ Logs are stored in the following locations:
 - Main log: `$PHOENIX_ADAPTERS_LOG_DIR/rest.log`
 - GC log: `$PHOENIX_ADAPTERS_LOG_DIR/gc.log`
 - Heap dumps: `$PHOENIX_ADAPTERS_LOG_DIR/` (on OutOfMemoryError)
+
+## DynamoDB-Compatible Alternatives
+
+Several open-source projects provide DynamoDB-compatible APIs on non-AWS infrastructure. Here's how they compare:
+
+| | **Phoenix-Adapters** | **ScyllaDB Alternator** | **ExtendDB** |
+|---|---|---|---|
+| **Storage Engine** | Apache Phoenix / HBase | ScyllaDB (embedded) | PostgreSQL |
+| **Language** | Java | C++ | Rust |
+| **Deployment** | Stateless REST servers + HBase cluster | Built into every ScyllaDB node | Single binary + PostgreSQL |
+
+### API Coverage
+
+| Operation | Phoenix-Adapters | Alternator | ExtendDB |
+|---|:---:|:---:|:---:|
+| CreateTable / DeleteTable / DescribeTable / ListTables | ✅ | ✅ | ✅ |
+| PutItem / GetItem / DeleteItem / UpdateItem | ✅ | ✅ | ✅ |
+| Query / Scan | ✅ | ✅ | ✅ |
+| BatchGetItem / BatchWriteItem | ✅ | ✅ | ✅ |
+| TransactWriteItems / TransactGetItems | ❌ | ❌ | ✅ |
+| DynamoDB Streams | ✅ | ✅ | ✅ |
+| GSI / LSI | ✅ | ✅ | ✅ |
+| TTL | ✅ | ✅ | ✅ |
+| Backup / Restore | ❌ | ❌ | ✅ |
+| Import / Export | ❌ | ❌ | ✅ |
+| Tagging | ❌ | ✅ | ✅ |
+| PartiQL | ❌ | ❌ | ❌ |
+
+### Expressions & Query Features
+
+| Feature | Phoenix-Adapters | Alternator | ExtendDB |
+|---|:---:|:---:|:---:|
+| ConditionExpression | ✅ | ✅ | ✅ |
+| FilterExpression | ✅ | ✅ | ✅ |
+| ProjectionExpression | ✅ | ✅ | ✅ |
+| UpdateExpression (SET/REMOVE/ADD/DELETE) | ✅ | ✅ | ✅ |
+| KeyConditionExpression | ✅ | ✅ | ✅ |
+| Legacy APIs (Expected, AttributesToGet, ScanFilter) | ✅ | ✅ | ❌ |
+
+### Scalability & Operations
+
+| | Phoenix-Adapters | Alternator | ExtendDB |
+|---|---|---|---|
+| **Horizontal scale** | Petabytes (HBase regions) | Petabytes (ScyllaDB vnodes) | Limited (PG vertical) |
+| **Multi-instance safe** | ✅ Stateless tier | ✅ Native (peer-to-peer) | ❌ No coordination (documented gap) |
+| **Write distribution** | Across HBase region servers | Across ScyllaDB nodes | Single PG writer |
+| **Consistency** | Configurable (HBase) | Tunable (LOCAL_ONE / LOCAL_QUORUM) | Strong (PG default) |
+| **Operational complexity** | High (HBase + Phoenix + ZK) | Medium (ScyllaDB cluster) | Low (binary + PG) |
+
+### Design Philosophy
+
+| | Phoenix-Adapters | Alternator | ExtendDB |
+|---|---|---|---|
+| **Approach** | Many APIs → one backend | Embedded in storage engine | One API → pluggable backends |
+| **Expression evaluation** | Server-side (Phoenix UDFs) | Native C++ in storage layer | In-process Rust evaluator |
+| **Index implementation** | Phoenix UNCOVERED INDEX | ScyllaDB materialized views | Separate PG tables |
+| **Stream implementation** | Phoenix CDC | ScyllaDB CDC | Atomic with data writes (PG txn) |
+
+### When to Use What
+
+| Scenario | Best Fit |
+|---|---|
+| Need DynamoDB compat at petabyte scale on HBase infrastructure | **Phoenix-Adapters** |
+| Already running ScyllaDB or want DDB API as a Cassandra alternative | **Alternator** |
+| Need high API fidelity, transactions, or a lightweight local setup | **ExtendDB** |
+| Must support legacy DynamoDB APIs (Expected, QueryFilter) | **Phoenix-Adapters** or **Alternator** |
+| Need multi-item atomic transactions (TransactWriteItems) | **ExtendDB** (only option) |
+
+### Links
+
+- [Phoenix-Adapters](https://github.com/salesforce/phoenix-adapters) — DynamoDB on Phoenix/HBase
+- [ScyllaDB Alternator](https://github.com/scylladb/scylladb/tree/master/alternator) — DynamoDB embedded in ScyllaDB
+- [ExtendDB](https://github.com/ExtendDB/extenddb) — DynamoDB on PostgreSQL (pluggable)
