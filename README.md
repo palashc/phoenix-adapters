@@ -266,6 +266,6 @@ Several open-source projects provide DynamoDB-compatible APIs on non-AWS infrast
 
 ### Links
 
-- [Phoenix-Adapters](https://github.com/salesforce/phoenix-adapters) — DynamoDB on Phoenix/HBase
-- [ScyllaDB Alternator](https://github.com/scylladb/scylladb/tree/master/alternator) — DynamoDB embedded in ScyllaDB
+- [Phoenix-Adapters](https://github.com/apache/phoenix-adapters) — DynamoDB on Phoenix/HBase
+- [ScyllaDB Alternator](https://www.scylladb.com/technologies/dynamodb-api/) — DynamoDB embedded in ScyllaDB
 - [ExtendDB](https://github.com/ExtendDB/extenddb) — DynamoDB on PostgreSQL (pluggable)
