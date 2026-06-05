@@ -270,6 +270,12 @@ HEAP_SETTINGS="$JAVA_HEAP_MAX $JAVA_OFFHEAP_MAX"
 # Initialize CLASSPATH
 CLASSPATH="${PHOENIX_ADAPTERS_CONF_DIR}:$JAVA_HOME/lib/tools.jar"
 
+# Include the HBase config dir (hbase-site.xml etc.) on the classpath so the server
+# reads the cluster's generated configuration
+if [ -n "${HBASE_CONF_DIR}" ] && [ -d "${HBASE_CONF_DIR}" ]; then
+    CLASSPATH="${CLASSPATH}:${HBASE_CONF_DIR}"
+fi
+
 # Set up logging options
 if [ -z "${PHOENIX_ADAPTERS_LOGGING_OPTS}" ]; then
     PHOENIX_ADAPTERS_LOGGING_OPTS="-Dlog4j2.configurationFile=file:$PHOENIX_ADAPTERS_CONF_DIR/log4j2.properties"
