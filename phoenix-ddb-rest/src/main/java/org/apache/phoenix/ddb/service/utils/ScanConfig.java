@@ -106,11 +106,13 @@ public class ScanConfig {
 
     @Override
     public String toString() {
+        StringBuilder sb = new StringBuilder(this.type.toString());
         if (isSegmentScan) {
-            return this.type.toString() + "," + this.scanSegmentInfo.toShortString();
-        } else {
-            return this.type.toString();
+            sb.append(",").append(this.scanSegmentInfo.toShortString());
         }
+        sb.append(",countOnly=").append(this.countOnly);
+        sb.append(",limit=").append(this.limit);
+        return sb.toString();
     }
 }
 

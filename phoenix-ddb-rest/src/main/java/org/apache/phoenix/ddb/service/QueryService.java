@@ -50,7 +50,13 @@ public class QueryService {
     public static final String SELECT_QUERY_WITH_INDEX_HINT =
             "SELECT /*+ INDEX(\"%s.%s\" \"%s\") */ COL FROM %s WHERE ";
 
+    public static final String COUNT_QUERY = "SELECT %s FROM %s WHERE ";
+    public static final String COUNT_QUERY_WITH_INDEX_HINT =
+            "SELECT /*+ INDEX(\"%s.%s\" \"%s\") */ %s FROM %s WHERE ";
+
     private static final int MAX_QUERY_LIMIT = 100;
+    /** Higher page cap when {@code Select=COUNT}: PK-only rows, byte cap not applied. */
+    private static final int MAX_COUNT_QUERY_LIMIT = 300;
 
     public static Map<String, Object> query(Map<String, Object> request, String connectionUrl) {
         ValidationUtil.validateQueryRequest(request);
@@ -107,15 +113,12 @@ public class QueryService {
         Map<String, Object> exprAttrValues =
                 (Map<String, Object>) request.get(ApiMetadata.EXPRESSION_ATTRIBUTE_VALUES);
         String keyCondExpr = (String) request.get(ApiMetadata.KEY_CONDITION_EXPRESSION);
+        boolean countOnly = ApiMetadata.SELECT_COUNT.equals(request.get(ApiMetadata.SELECT));
 
         // build SQL query
-        StringBuilder queryBuilder = StringUtils.isEmpty(indexName) ?
-                new StringBuilder(String.format(SELECT_QUERY,
-                        PhoenixUtils.getFullTableName(tableName, true))) :
-                new StringBuilder(
-                        String.format(SELECT_QUERY_WITH_INDEX_HINT, PhoenixUtils.SCHEMA_NAME,
-                                tableName, PhoenixUtils.getInternalIndexName(tableName, indexName),
-                                PhoenixUtils.getFullTableName(tableName, true)));
+        StringBuilder queryBuilder =
+                new StringBuilder(buildSelectClause(countOnly, useIndex, tableName, indexName,
+                        tablePKCols, indexPKCols));
 
         // parse Key Conditions
         KeyConditionsHolder keyConditions;
@@ -136,13 +139,37 @@ public class QueryService {
         DQLUtils.addFilterCondition(true, queryBuilder, (String) request.get(ApiMetadata.FILTER_EXPRESSION),
                 exprAttrNames, exprAttrValues);
         addOrderByClause(queryBuilder, useIndex, tablePKCols, indexPKCols, scanIndexForward);
-        DQLUtils.addLimit(queryBuilder, (Integer) request.get(ApiMetadata.LIMIT), MAX_QUERY_LIMIT);
+        DQLUtils.addLimit(queryBuilder, (Integer) request.get(ApiMetadata.LIMIT),
+                countOnly ? MAX_COUNT_QUERY_LIMIT : MAX_QUERY_LIMIT);
         LOGGER.debug("SELECT Query: " + queryBuilder);
 
         // Set values on the PreparedStatement
         PreparedStatement stmt = conn.prepareStatement(queryBuilder.toString());
         setPreparedStatementValues(stmt, request, keyConditions, useIndex, tablePKCols, indexPKCols);
         return Pair.newPair(stmt, !useIndex && tablePKCols.size() == 1);
+    }
+
+    /**
+     * On the count-only path the projection is PK columns only ; cheap on an UNCOVERED
+     * INDEX since no back-join to the data table is needed.
+     */
+    private static String buildSelectClause(boolean countOnly, boolean useIndex, String tableName,
+            String indexName, List<PColumn> tablePKCols, List<PColumn> indexPKCols) {
+        String fullTableName = PhoenixUtils.getFullTableName(tableName, true);
+        if (countOnly) {
+            String projection = DQLUtils.buildCountProjection(useIndex, tablePKCols, indexPKCols);
+            if (useIndex) {
+                return String.format(COUNT_QUERY_WITH_INDEX_HINT, PhoenixUtils.SCHEMA_NAME,
+                        tableName, PhoenixUtils.getInternalIndexName(tableName, indexName),
+                        projection, fullTableName);
+            }
+            return String.format(COUNT_QUERY, projection, fullTableName);
+        }
+        if (useIndex) {
+            return String.format(SELECT_QUERY_WITH_INDEX_HINT, PhoenixUtils.SCHEMA_NAME, tableName,
+                    PhoenixUtils.getInternalIndexName(tableName, indexName), fullTableName);
+        }
+        return String.format(SELECT_QUERY, fullTableName);
     }
 
     private static void addOrderByClause(StringBuilder queryBuilder, boolean useIndex,

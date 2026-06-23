@@ -440,6 +440,65 @@ public class QueryIndex1IT {
     }
 
     @Test(timeout = 120000)
+    public void testQueryIndexSelectCountWithNonPKFilter() throws SQLException {
+        // create table with keys [attr_0]
+        final String tableName = testName.getMethodName();
+        final String indexName = "IDX_" + tableName;
+        CreateTableRequest createTableRequest =
+                DDLTestUtils.getCreateTableRequest(tableName, "attr_0",
+                        ScalarAttributeType.S, null, null);
+        // create index on Id3, IdS
+        createTableRequest = DDLTestUtils.addIndexToRequest(true, createTableRequest, indexName, "Id3",
+                ScalarAttributeType.S, "IdS", ScalarAttributeType.S);
+        phoenixDBClientV2.createTable(createTableRequest);
+        dynamoDbClient.createTable(createTableRequest);
+
+        //put items
+        PutItemRequest putItemRequest1 = PutItemRequest.builder().tableName(tableName).item(getItem1()).build();
+        PutItemRequest putItemRequest2 = PutItemRequest.builder().tableName(tableName).item(getItem2()).build();
+        PutItemRequest putItemRequest3 = PutItemRequest.builder().tableName(tableName).item(getItem3()).build();
+        PutItemRequest putItemRequest4 = PutItemRequest.builder().tableName(tableName).item(getItem4()).build();
+        phoenixDBClientV2.putItem(putItemRequest1);
+        phoenixDBClientV2.putItem(putItemRequest2);
+        phoenixDBClientV2.putItem(putItemRequest3);
+        phoenixDBClientV2.putItem(putItemRequest4);
+        dynamoDbClient.putItem(putItemRequest1);
+        dynamoDbClient.putItem(putItemRequest2);
+        dynamoDbClient.putItem(putItemRequest3);
+        dynamoDbClient.putItem(putItemRequest4);
+
+        // Query the GSI for Id3="foo" (matches items 1 + 2) with a FilterExpression on
+        // Id2 (non-PK and not on the index). Id2 forces a server-side BSON_CONDITION_EXPRESSION
+        // evaluation against COL even though the gateway projects only PK columns on the
+        // count path. Filter keeps only item 1 (Id2=1.1); item 2 (Id2=2.2) is filtered out.
+        QueryRequest.Builder qr = QueryRequest.builder().tableName(tableName);
+        qr.indexName(indexName);
+        qr.keyConditionExpression("#0 = :v0");
+        qr.filterExpression("#1 < :v1");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#0", "Id3");
+        exprAttrNames.put("#1", "Id2");
+        qr.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v0", AttributeValue.builder().s("foo").build());
+        exprAttrVal.put(":v1", AttributeValue.builder().n("2.0").build());
+        qr.expressionAttributeValues(exprAttrVal);
+        qr.select("COUNT");
+        TestUtils.waitForEventualConsistentIndex();
+
+        QueryResponse phoenixResult = phoenixDBClientV2.query(qr.build());
+        QueryResponse dynamoResult = dynamoDbClient.query(qr.build());
+        Assert.assertEquals(dynamoResult.count(), phoenixResult.count());
+        Assert.assertEquals(1, phoenixResult.count().intValue());
+        Assert.assertTrue(phoenixResult.items().isEmpty());
+        Assert.assertTrue(dynamoResult.items().isEmpty());
+        Assert.assertEquals(dynamoResult.scannedCount(), phoenixResult.scannedCount());
+
+        // explain plan
+        TestUtils.validateIndexUsed(qr.build(), url);
+    }
+
+    @Test(timeout = 120000)
     public void testQueryIndexSelectCountWithPagination() throws SQLException {
         // create table with keys [attr_0]
         final String tableName = testName.getMethodName();

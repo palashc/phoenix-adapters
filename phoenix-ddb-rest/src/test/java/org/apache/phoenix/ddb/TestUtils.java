@@ -465,6 +465,95 @@ public class TestUtils {
         Assert.assertTrue(ItemComparator.areItemsEqual(ddbResult, phoenixResult));
     }
 
+    /**
+     * Paginated parity comparison for {@code Select=COUNT} Query: sets {@code Select=COUNT}
+     * on the builder, drains both Phoenix and DynamoDB, and asserts the summed {@code count}
+     * matches.
+     */
+    public static void compareQueryCountOutputs(QueryRequest.Builder qr,
+            DynamoDbClient phoenixDBClientV2, DynamoDbClient dynamoDbClient) {
+        qr.select("COUNT");
+        int phoenixCount = 0;
+        QueryResponse phoenixResponse;
+        do {
+            phoenixResponse = phoenixDBClientV2.query(qr.build());
+            phoenixCount += phoenixResponse.count();
+            qr.exclusiveStartKey(phoenixResponse.lastEvaluatedKey());
+        } while (phoenixResponse.hasLastEvaluatedKey());
+
+        qr.exclusiveStartKey(null);
+        int ddbCount = 0;
+        QueryResponse ddbResponse;
+        do {
+            ddbResponse = dynamoDbClient.query(qr.build());
+            ddbCount += ddbResponse.count();
+            qr.exclusiveStartKey(ddbResponse.lastEvaluatedKey());
+        } while (ddbResponse.hasLastEvaluatedKey());
+
+        Assert.assertEquals("count mismatch", ddbCount, phoenixCount);
+    }
+
+    /**
+     * Paginated parity comparison asserting {@code items}, {@code count}, and
+     * {@code lastEvaluatedKey} match between Phoenix and DynamoDB at every page,
+     * plus a final cumulative-count check. Stricter than
+     * {@link #compareQueryOutputs} which only compares cumulative end-state,
+     * use this for stress / cursor-format regression tests.
+     */
+    public static void compareQueryOutputsPerPage(QueryRequest.Builder qr,
+            DynamoDbClient phoenixDBClientV2, DynamoDbClient dynamoDbClient) {
+        int page = 0;
+        int phoenixTotal = 0;
+        int ddbTotal = 0;
+        QueryResponse phoenixResponse;
+        QueryResponse ddbResponse;
+        do {
+            phoenixResponse = phoenixDBClientV2.query(qr.build());
+            ddbResponse = dynamoDbClient.query(qr.build());
+            Assert.assertEquals("items mismatch at page " + page,
+                    ddbResponse.items(), phoenixResponse.items());
+            Assert.assertEquals("count mismatch at page " + page,
+                    ddbResponse.count(), phoenixResponse.count());
+            Assert.assertEquals("cursor mismatch at page " + page,
+                    ddbResponse.lastEvaluatedKey(), phoenixResponse.lastEvaluatedKey());
+            phoenixTotal += phoenixResponse.count();
+            ddbTotal += ddbResponse.count();
+            qr.exclusiveStartKey(phoenixResponse.lastEvaluatedKey());
+            page++;
+        } while (phoenixResponse.lastEvaluatedKey() != null
+                && !phoenixResponse.lastEvaluatedKey().isEmpty());
+        Assert.assertEquals("total count mismatch", ddbTotal, phoenixTotal);
+    }
+
+    /**
+     * Paginated {@code Select=COUNT} variant of {@link #compareQueryOutputsPerPage}.
+     * Sets {@code Select=COUNT} on the builder; asserts per-page {@code count} +
+     * {@code lastEvaluatedKey} parity and final cumulative-count parity.
+     */
+    public static void compareQueryCountOutputsPerPage(QueryRequest.Builder qr,
+            DynamoDbClient phoenixDBClientV2, DynamoDbClient dynamoDbClient) {
+        qr.select("COUNT");
+        int page = 0;
+        int phoenixTotal = 0;
+        int ddbTotal = 0;
+        QueryResponse phoenixResponse;
+        QueryResponse ddbResponse;
+        do {
+            phoenixResponse = phoenixDBClientV2.query(qr.build());
+            ddbResponse = dynamoDbClient.query(qr.build());
+            Assert.assertEquals("count mismatch at page " + page,
+                    ddbResponse.count(), phoenixResponse.count());
+            Assert.assertEquals("cursor mismatch at page " + page,
+                    ddbResponse.lastEvaluatedKey(), phoenixResponse.lastEvaluatedKey());
+            phoenixTotal += phoenixResponse.count();
+            ddbTotal += ddbResponse.count();
+            qr.exclusiveStartKey(phoenixResponse.lastEvaluatedKey());
+            page++;
+        } while (phoenixResponse.lastEvaluatedKey() != null
+                && !phoenixResponse.lastEvaluatedKey().isEmpty());
+        Assert.assertEquals("total count mismatch", ddbTotal, phoenixTotal);
+    }
+
     public static void compareScanOutputs(ScanRequest.Builder sr,
             DynamoDbClient phoenixDBClientV2, DynamoDbClient dynamoDbClient,
             String partitionKeyName, String sortKeyName, ScalarAttributeType partitionKeyType,

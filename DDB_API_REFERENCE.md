@@ -370,7 +370,9 @@ All list/query/scan operations support pagination:
 | BatchGetItem response size | 16 MB | BatchGetItem |
 | GetRecords response size | 1 MB | GetRecords |
 | Query result limit (max per page) | 100 items OR 1 MB, whichever comes first | Query |
+| Query result limit (max per page) when `Select=COUNT` | 300 rows; 1 MB byte cap does NOT apply | Query |
 | Scan result limit (max per page) | 100 items OR 1 MB, whichever comes first | Scan |
+| Scan result limit (max per page) when `Select=COUNT` | 300 rows; 1 MB byte cap does NOT apply | Scan |
 | GetRecords limit (max per page) | 50 records OR 1 MB, whichever comes first | GetRecords |
 | ListTables default limit | 100 tables | ListTables |
 | ListStreams default limit | 100 streams | ListStreams |
@@ -1225,7 +1227,7 @@ Retrieves items from a table or index based on primary key conditions. Items are
 | `FilterExpression` | String | No | Post-read filter |
 | `ProjectionExpression` | String | No | Attributes to return |
 | `Select` | String | No | What to return (see below) |
-| `Limit` | Integer | No | Max items to return (capped at 100 items OR 1 MB, whichever comes first) |
+| `Limit` | Integer | No | Max items to return (capped at 100 items OR 1 MB, whichever comes first; when `Select=COUNT` the per-page cap is 300 rows and the 1 MB byte cap does NOT apply) |
 | `ScanIndexForward` | Boolean | No | `true` (default) = ASC, `false` = DESC |
 | `ExclusiveStartKey` | Map | No | Pagination cursor from previous response |
 | `KeyConditions` | Map | No | Legacy key conditions (*mutually exclusive with `KeyConditionExpression`*) |
@@ -1302,7 +1304,7 @@ Returns all items from a table or index (full table scan). Supports filtering an
 | `ExpressionAttributeValues` | Map | No | Value placeholders |
 | `ProjectionExpression` | String | No | Attributes to return |
 | `Select` | String | No | `ALL_ATTRIBUTES`, `SPECIFIC_ATTRIBUTES`, or `COUNT` |
-| `Limit` | Integer | No | Max items per page (capped at 100 items OR 1 MB, whichever comes first) |
+| `Limit` | Integer | No | Max items per page (capped at 100 items OR 1 MB, whichever comes first; when `Select=COUNT` the per-page cap is 300 rows and the 1 MB byte cap does NOT apply) |
 | `ExclusiveStartKey` | Map | No | Pagination cursor |
 | `Segment` | Integer | No | Segment number for parallel scan |
 | `TotalSegments` | Integer | No | Total segments for parallel scan |

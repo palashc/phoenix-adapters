@@ -837,6 +837,14 @@ public class Misc1Util {
     public static void test3(DynamoDbClient dynamoDbClient, DynamoDbClient phoenixDBClientV2,
             DynamoDbStreamsClient dynamoDbStreamsClient,
             DynamoDbStreamsClient phoenixDBStreamsClientV2) throws InterruptedException {
+        test3(dynamoDbClient, phoenixDBClientV2, dynamoDbStreamsClient, phoenixDBStreamsClientV2,
+                false);
+    }
+
+    public static void test3(DynamoDbClient dynamoDbClient, DynamoDbClient phoenixDBClientV2,
+            DynamoDbStreamsClient dynamoDbStreamsClient,
+            DynamoDbStreamsClient phoenixDBStreamsClientV2, boolean useCount)
+            throws InterruptedException {
 
         String table1Name = "test.highVolume_table1";
         String table2Name = "test.highVolume_table2";
@@ -881,21 +889,24 @@ public class Misc1Util {
                     .keyConditionExpression("pk = :pkval").expressionAttributeValues(
                             Collections.singletonMap(":pkval",
                                     AttributeValue.builder().s(pkValueTable1).build()));
-            TestUtils.compareQueryOutputs(queryBuilder1, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder1, phoenixDBClientV2, dynamoDbClient, useCount);
 
             LOGGER.info("Querying and comparing partition {} for table2", pkValueTable2);
             QueryRequest.Builder queryBuilder2 = QueryRequest.builder().tableName(table2Name)
                     .keyConditionExpression("pk = :pkval").expressionAttributeValues(
                             Collections.singletonMap(":pkval",
                                     AttributeValue.builder().s(pkValueTable2).build()));
-            TestUtils.compareQueryOutputs(queryBuilder2, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder2, phoenixDBClientV2, dynamoDbClient, useCount);
         }
 
-        queryGSIsWithoutConditions(dynamoDbClient, phoenixDBClientV2, table1Name, "_t1");
-        queryGSIsWithSortKeyConditions(dynamoDbClient, phoenixDBClientV2, table2Name, "_t2");
+        queryGSIsWithoutConditions(dynamoDbClient, phoenixDBClientV2, table1Name, "_t1", useCount);
+        queryGSIsWithSortKeyConditions(dynamoDbClient, phoenixDBClientV2, table2Name, "_t2",
+                useCount);
 
-        queryLSIsWithSortKeyConditions(dynamoDbClient, phoenixDBClientV2, table1Name, "_t1");
-        queryLSIsWithSortKeyConditions(dynamoDbClient, phoenixDBClientV2, table2Name, "_t2");
+        queryLSIsWithSortKeyConditions(dynamoDbClient, phoenixDBClientV2, table1Name, "_t1",
+                useCount);
+        queryLSIsWithSortKeyConditions(dynamoDbClient, phoenixDBClientV2, table2Name, "_t2",
+                useCount);
 
         TestUtils.compareAllStreamRecords(table1Name, dynamoDbStreamsClient,
                 phoenixDBStreamsClientV2);
@@ -906,6 +917,15 @@ public class Misc1Util {
         phoenixDBClientV2.deleteTable(DeleteTableRequest.builder().tableName(table1Name).build());
         dynamoDbClient.deleteTable(DeleteTableRequest.builder().tableName(table2Name).build());
         phoenixDBClientV2.deleteTable(DeleteTableRequest.builder().tableName(table2Name).build());
+    }
+
+    private static void runCompareQuery(QueryRequest.Builder qr, DynamoDbClient phoenix,
+            DynamoDbClient dynamo, boolean useCount) {
+        if (useCount) {
+            TestUtils.compareQueryCountOutputs(qr, phoenix, dynamo);
+        } else {
+            TestUtils.compareQueryOutputs(qr, phoenix, dynamo);
+        }
     }
 
     private static CreateTableRequest createHighVolumeTableRequest(String tableName) {
@@ -1173,7 +1193,8 @@ public class Misc1Util {
     }
 
     private static void queryGSIsWithoutConditions(DynamoDbClient dynamoDbClient,
-            DynamoDbClient phoenixDBClientV2, String tableName, String tableSuffix) {
+            DynamoDbClient phoenixDBClientV2, String tableName, String tableSuffix,
+            boolean useCount) {
 
         // Query GSI 1 (gsi1_pk values: gsi1_0 to gsi1_9)
         for (int i = 0; i < 10; i++) {
@@ -1183,7 +1204,7 @@ public class Misc1Util {
                             .keyConditionExpression("gsi1_pk = :gsi1val").expressionAttributeValues(
                                     Collections.singletonMap(":gsi1val",
                                             AttributeValue.builder().s(gsi1Value).build()));
-            TestUtils.compareQueryOutputs(queryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
 
         // Query GSI 2 (gsi2_pk values: 0 to 19 for table1, 100 to 119 for table2)
@@ -1195,7 +1216,7 @@ public class Misc1Util {
                                     Collections.singletonMap(":gsi2val",
                                             AttributeValue.builder().n(String.valueOf(i + gsi2Offset))
                                                     .build()));
-            TestUtils.compareQueryOutputs(queryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
 
         // Query GSI 3 (gsi3_pk values: gsi3_cat_0 to gsi3_cat_4)
@@ -1206,12 +1227,13 @@ public class Misc1Util {
                             .keyConditionExpression("gsi3_pk = :gsi3val").expressionAttributeValues(
                                     Collections.singletonMap(":gsi3val",
                                             AttributeValue.builder().s(gsi3Value).build()));
-            TestUtils.compareQueryOutputs(queryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
     }
 
     private static void queryGSIsWithSortKeyConditions(DynamoDbClient dynamoDbClient,
-            DynamoDbClient phoenixDBClientV2, String tableName, String tableSuffix) {
+            DynamoDbClient phoenixDBClientV2, String tableName, String tableSuffix,
+            boolean useCount) {
 
         // Sort key offset: 0 for table1, 1000000 for table2
         int sortKeyOffset = tableSuffix.equals("_t1") ? 0 : 1000000;
@@ -1230,7 +1252,7 @@ public class Misc1Util {
                     QueryRequest.builder().tableName(tableName).indexName("gsi_index_1")
                             .keyConditionExpression("gsi1_pk = :gsi1val AND gsi1_sk > :skval")
                             .expressionAttributeValues(expressionValues);
-            TestUtils.compareQueryOutputs(queryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
 
         // GSI 2 offset: 0 for table1, 100 for table2
@@ -1253,7 +1275,7 @@ public class Misc1Util {
                             .keyConditionExpression(
                                     "gsi2_pk = :gsi2val AND gsi2_sk BETWEEN :lower AND :upper")
                             .expressionAttributeValues(expressionValues);
-            TestUtils.compareQueryOutputs(queryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
 
         for (int i = 0; i < 5; i++) {
@@ -1270,12 +1292,13 @@ public class Misc1Util {
                     QueryRequest.builder().tableName(tableName).indexName("gsi_index_3")
                             .keyConditionExpression("gsi3_pk = :gsi3val AND gsi3_sk < :skval")
                             .expressionAttributeValues(expressionValues);
-            TestUtils.compareQueryOutputs(queryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(queryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
     }
 
     private static void queryLSIsWithSortKeyConditions(DynamoDbClient dynamoDbClient,
-            DynamoDbClient phoenixDBClientV2, String tableName, String tableSuffix) {
+            DynamoDbClient phoenixDBClientV2, String tableName, String tableSuffix,
+            boolean useCount) {
 
         int sortKeyOffset = tableSuffix.equals("_t1") ? 0 : 1000000;
 
@@ -1294,7 +1317,7 @@ public class Misc1Util {
                     QueryRequest.builder().tableName(tableName).indexName("lsi_index_1")
                             .keyConditionExpression("pk = :pkval AND lsi1_sk > :skval")
                             .expressionAttributeValues(lsi1Expr);
-            TestUtils.compareQueryOutputs(lsi1QueryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(lsi1QueryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
 
             // LSI 2: Query with string sort key BETWEEN condition
             // lsi2_sk format: "item_XXXXX_t1" or "item_XXXXX_t2"
@@ -1310,7 +1333,7 @@ public class Misc1Util {
                             .keyConditionExpression(
                                     "pk = :pkval AND lsi2_sk BETWEEN :lower AND :upper")
                             .expressionAttributeValues(lsi2Expr);
-            TestUtils.compareQueryOutputs(lsi2QueryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(lsi2QueryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
 
             // LSI 3: Query with timestamp-based sort key < condition
             // lsi3_sk = currentTime + (sortKeyId * 1000) + timestampOffset
@@ -1328,14 +1351,14 @@ public class Misc1Util {
                     QueryRequest.builder().tableName(tableName).indexName("lsi_index_3")
                             .keyConditionExpression("pk = :pkval AND lsi3_sk <= :skval")
                             .expressionAttributeValues(lsi3Expr);
-            TestUtils.compareQueryOutputs(lsi3QueryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(lsi3QueryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
 
             QueryRequest.Builder lsi4QueryBuilder =
                     QueryRequest.builder().tableName(tableName).indexName("lsi_index_3")
                             .scanIndexForward(false)
                             .keyConditionExpression("pk = :pkval AND lsi3_sk < :skval")
                             .expressionAttributeValues(lsi3Expr);
-            TestUtils.compareQueryOutputs(lsi4QueryBuilder, phoenixDBClientV2, dynamoDbClient);
+            runCompareQuery(lsi4QueryBuilder, phoenixDBClientV2, dynamoDbClient, useCount);
         }
     }
 

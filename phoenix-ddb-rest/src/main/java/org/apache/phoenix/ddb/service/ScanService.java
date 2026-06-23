@@ -53,7 +53,13 @@ public class ScanService {
     private static final String SELECT_QUERY_WITH_INDEX_HINT =
             "SELECT /*+ INDEX(\"%s.%s\" \"%s\") */ COL FROM %s ";
 
+    private static final String COUNT_QUERY = "SELECT %s FROM %s ";
+    private static final String COUNT_QUERY_WITH_INDEX_HINT =
+            "SELECT /*+ INDEX(\"%s.%s\" \"%s\") */ %s FROM %s ";
+
     private static final int MAX_SCAN_LIMIT = 100;
+    /** See {@link QueryService} ; mirrors {@code MAX_COUNT_QUERY_LIMIT}. */
+    private static final int MAX_COUNT_SCAN_LIMIT = 300;
 
     public static Map<String, Object> scan(Map<String, Object> request, String connectionUrl) {
         ValidationUtil.validateScanRequest(request);
@@ -114,12 +120,12 @@ public class ScanService {
         return ScanType.WITH_EXCLUSIVE_START_KEY;
     }
 
-    /**
-     * Get effective limit, applying default and maximum constraints
-     */
     private static int getEffectiveLimit(Map<String, Object> request) {
         Integer requestLimit = (Integer) request.get(ApiMetadata.LIMIT);
-        return (requestLimit == null) ? MAX_SCAN_LIMIT : Math.min(requestLimit, MAX_SCAN_LIMIT);
+        int max = ApiMetadata.SELECT_COUNT.equals(request.get(ApiMetadata.SELECT))
+                ? MAX_COUNT_SCAN_LIMIT
+                : MAX_SCAN_LIMIT;
+        return (requestLimit == null) ? max : Math.min(requestLimit, max);
     }
 
     /**
@@ -153,18 +159,32 @@ public class ScanService {
     }
 
     /**
-     * Build the base SELECT clause with optional index hint
+     * Build the base SELECT clause with optional index hint. On the count-only path
+     * (including segment scans, which share this builder) the projection is PK columns
+     * only.
      */
     private static StringBuilder buildBaseSelectClause(ScanConfig config) {
         String fullTableName = PhoenixUtils.getFullTableName(config.getTableName(), true);
-        if (StringUtils.isEmpty(config.getIndexName())) {
-            return new StringBuilder(String.format(SELECT_QUERY, fullTableName));
-        } else {
-            String fullIndexName = PhoenixUtils.getInternalIndexName(config.getTableName(), config.getIndexName());
-            return new StringBuilder(
-                    String.format(SELECT_QUERY_WITH_INDEX_HINT, PhoenixUtils.SCHEMA_NAME,
-                            config.getTableName(), fullIndexName, fullTableName));
+        boolean useIndex = !StringUtils.isEmpty(config.getIndexName());
+        if (config.isCountOnly()) {
+            String projection = DQLUtils.buildCountProjection(useIndex, config.getTablePKCols(),
+                    config.getIndexPKCols());
+            if (!useIndex) {
+                return new StringBuilder(String.format(COUNT_QUERY, projection, fullTableName));
+            }
+            String fullIndexName = PhoenixUtils.getInternalIndexName(config.getTableName(),
+                    config.getIndexName());
+            return new StringBuilder(String.format(COUNT_QUERY_WITH_INDEX_HINT,
+                    PhoenixUtils.SCHEMA_NAME, config.getTableName(), fullIndexName, projection,
+                    fullTableName));
         }
+        if (!useIndex) {
+            return new StringBuilder(String.format(SELECT_QUERY, fullTableName));
+        }
+        String fullIndexName = PhoenixUtils.getInternalIndexName(config.getTableName(),
+                config.getIndexName());
+        return new StringBuilder(String.format(SELECT_QUERY_WITH_INDEX_HINT,
+                PhoenixUtils.SCHEMA_NAME, config.getTableName(), fullIndexName, fullTableName));
     }
 
     /**

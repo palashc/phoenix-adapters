@@ -56,7 +56,7 @@ public final class BsonNumberConversionUtil {
      * @param number The Number object.
      * @return String represented number value.
      */
-    static String numberToString(Number number) {
+    public static String numberToString(Number number) {
         if (number instanceof Integer || number instanceof Short || number instanceof Byte) {
             return Integer.toString(number.intValue());
         } else if (number instanceof Long) {

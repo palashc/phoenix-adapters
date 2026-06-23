@@ -2,12 +2,14 @@ package org.apache.phoenix.ddb.service.utils;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.phoenix.ddb.bson.BsonDocumentToMap;
+import org.apache.phoenix.ddb.bson.BsonNumberConversionUtil;
 import org.apache.phoenix.ddb.service.exceptions.ValidationException;
 import org.apache.phoenix.ddb.utils.ApiMetadata;
 import org.apache.phoenix.ddb.utils.CommonServiceUtils;
 import org.apache.phoenix.ddb.utils.PhoenixUtils;
 import org.apache.phoenix.jdbc.PhoenixResultSet;
 import org.apache.phoenix.schema.PColumn;
+import org.apache.phoenix.schema.types.PDataType;
 
 import org.bson.BsonDocument;
 import org.bson.RawBsonDocument;
@@ -21,7 +23,6 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 /**
  * Utility methods used for both Query and Scan API requests.
@@ -35,43 +36,23 @@ public class DQLUtils {
     private static final String RVC_4 = "(%s, %s, %s, %s) %s (?, ?, ?, ?)";
 
     /**
-     * Execute the given PreparedStatement, collect all returned items with projected attributes
-     * and return QueryResult or ScanResponse.
+     * Execute the given PreparedStatement and return a QueryResult / ScanResponse.
+     *
+     * <p>When {@code countOnly} is true the SQL must project PK columns only
+     * (see {@link #buildCountProjection}); the per-row {@code MAX_BYTES_SIZE} cap does
+     * not apply on that path ; row count is bounded by the SQL {@code LIMIT}.
      */
     public static Map<String, Object> executeStatementReturnResult(PreparedStatement stmt,
             List<String> projectionAttributes, boolean useIndex,
             List<PColumn> tablePKCols, List<PColumn> indexPKCols, String tableName,
             boolean isSingleRowExpected, boolean countOnly) throws SQLException {
-        int count = 0;
-        int bytesSize = 0;
-        List<Map<String, Object>> items = new ArrayList<>();
-        RawBsonDocument lastBsonDoc = null;
         try (ResultSet rs = stmt.executeQuery()) {
-            while (rs.next()) {
-                lastBsonDoc = (RawBsonDocument) rs.getObject(1);
-                Map<String, Object> item =
-                        BsonDocumentToMap.getProjectedItem(lastBsonDoc, projectionAttributes);
-                items.add(item);
-                count++;
-                bytesSize +=
-                        (int) rs.unwrap(PhoenixResultSet.class).getCurrentRow().getSerializedSize();
-                if (bytesSize >= ApiMetadata.MAX_BYTES_SIZE) {
-                    break;
-                }
+            if (countOnly) {
+                return executeCountOnlyResult(rs, useIndex, tablePKCols, indexPKCols, tableName,
+                        isSingleRowExpected);
             }
-            Map<String, Object> lastKey = isSingleRowExpected ? null
-                    : DQLUtils.getKeyFromDoc(lastBsonDoc, useIndex, tablePKCols, indexPKCols);
-            int countRowsScanned = (int) PhoenixUtils.getRowsScanned(rs);
-            Map<String, Object> response = new HashMap<>();
-            if (!countOnly) {
-                response.put(ApiMetadata.ITEMS, items);
-            }
-            response.put(ApiMetadata.COUNT, count);
-            response.put(ApiMetadata.LAST_EVALUATED_KEY, lastKey);
-            response.put(ApiMetadata.SCANNED_COUNT, countRowsScanned);
-            response.put(ApiMetadata.CONSUMED_CAPACITY,
-                    CommonServiceUtils.getConsumedCapacity(tableName));
-            return response;
+            return executeItemsResult(rs, projectionAttributes, useIndex, tablePKCols, indexPKCols,
+                    tableName, isSingleRowExpected);
         } catch (SQLException e) {
             if (e.getMessage() != null && e.getMessage()
                     .contains("BsonConditionInvalidArgumentException")) {
@@ -79,6 +60,142 @@ public class DQLUtils {
             }
             throw e;
         }
+    }
+
+    private static Map<String, Object> executeItemsResult(ResultSet rs,
+            List<String> projectionAttributes, boolean useIndex,
+            List<PColumn> tablePKCols, List<PColumn> indexPKCols, String tableName,
+            boolean isSingleRowExpected) throws SQLException {
+        int count = 0;
+        int bytesSize = 0;
+        List<Map<String, Object>> items = new ArrayList<>();
+        RawBsonDocument lastBsonDoc = null;
+        while (rs.next()) {
+            lastBsonDoc = (RawBsonDocument) rs.getObject(1);
+            Map<String, Object> item =
+                    BsonDocumentToMap.getProjectedItem(lastBsonDoc, projectionAttributes);
+            items.add(item);
+            count++;
+            bytesSize +=
+                    (int) rs.unwrap(PhoenixResultSet.class).getCurrentRow().getSerializedSize();
+            if (bytesSize >= ApiMetadata.MAX_BYTES_SIZE) {
+                break;
+            }
+        }
+        Map<String, Object> lastKey = isSingleRowExpected ? null
+                : DQLUtils.getKeyFromDoc(lastBsonDoc, useIndex, tablePKCols, indexPKCols);
+        Map<String, Object> response = buildResponseEnvelope(count,
+                (int) PhoenixUtils.getRowsScanned(rs), lastKey, tableName);
+        response.put(ApiMetadata.ITEMS, items);
+        return response;
+    }
+
+    private static Map<String, Object> executeCountOnlyResult(ResultSet rs, boolean useIndex,
+            List<PColumn> tablePKCols, List<PColumn> indexPKCols, String tableName,
+            boolean isSingleRowExpected) throws SQLException {
+        int count = 0;
+        Map<String, Object> lastKey = isSingleRowExpected ? null : new HashMap<>();
+        boolean haveLastRow = false;
+        while (rs.next()) {
+            count++;
+            if (lastKey != null) {
+                readKeyFromResultSet(rs, lastKey, useIndex, tablePKCols, indexPKCols);
+                haveLastRow = true;
+            }
+        }
+        return buildResponseEnvelope(count, (int) PhoenixUtils.getRowsScanned(rs),
+                haveLastRow ? lastKey : null, tableName);
+    }
+
+    private static Map<String, Object> buildResponseEnvelope(int count, int scannedCount,
+            Map<String, Object> lastKey, String tableName) {
+        Map<String, Object> response = new HashMap<>();
+        response.put(ApiMetadata.COUNT, count);
+        response.put(ApiMetadata.LAST_EVALUATED_KEY, lastKey);
+        response.put(ApiMetadata.SCANNED_COUNT, scannedCount);
+        response.put(ApiMetadata.CONSUMED_CAPACITY,
+                CommonServiceUtils.getConsumedCapacity(tableName));
+        return response;
+    }
+
+    /**
+     * Comma-separated list of PK columns (index PKs first when {@code useIndex}, then table
+     * PKs). Used as the SELECT projection on the count-only path: on an UNCOVERED INDEX this
+     * projection is fully covered by the index row key, so the server never back-joins to
+     * the data table.
+     */
+    public static String buildCountProjection(boolean useIndex, List<PColumn> tablePKCols,
+            List<PColumn> indexPKCols) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        if (useIndex && indexPKCols != null) {
+            for (PColumn pkCol : indexPKCols) {
+                if (!first) sb.append(", ");
+                sb.append(CommonServiceUtils.getColumnExprFromPCol(pkCol, true));
+                first = false;
+            }
+        }
+        for (PColumn pkCol : tablePKCols) {
+            if (!first) sb.append(", ");
+            sb.append(CommonServiceUtils.getEscapedArgument(pkCol.getName().toString()));
+            first = false;
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Overwrite {@code dest} with the current row's PK values, index PKs first when
+     * {@code useIndex}, then table PKs.
+     */
+    private static void readKeyFromResultSet(ResultSet rs, Map<String, Object> dest,
+            boolean useIndex, List<PColumn> tablePKCols, List<PColumn> indexPKCols)
+            throws SQLException {
+        int col = 1;
+        if (useIndex && indexPKCols != null) {
+            for (PColumn pkCol : indexPKCols) {
+                String name =
+                        CommonServiceUtils.getKeyNameFromBsonValueFunc(pkCol.getName().toString());
+                dest.put(name, attributeValueFromResultSetColumn(rs, col++, pkCol.getDataType()));
+            }
+        }
+        for (PColumn pkCol : tablePKCols) {
+            dest.put(pkCol.getName().toString(),
+                    attributeValueFromResultSetColumn(rs, col++, pkCol.getDataType()));
+        }
+    }
+
+    /** Convert a JDBC ResultSet column (typed by {@code PDataType}) into a DynamoDB-shaped
+     *  attribute map (one of {@code {S: <string>}}, {@code {N: <string>}}, {@code {B: <base64 string>}}). */
+    private static Map<String, Object> attributeValueFromResultSetColumn(ResultSet rs, int col,
+                                                                         PDataType<?> dataType) throws SQLException {
+        Map<String, Object> attrVal = new HashMap<>();
+        switch (CommonServiceUtils.getScalarAttributeFromPDataType(dataType)) {
+            case S:
+                attrVal.put("S", rs.getString(col));
+                break;
+            case N:
+                // N PKs are always stored in a DOUBLE column (see CreateTableService) so we
+                // can't recover the original BSON sub-type. Pick the Number sub-type that gives
+                // items-path-compatible formatting: long form when integral, double form
+                // otherwise.
+                double d = rs.getDouble(col);
+                Number n;
+                if (!Double.isInfinite(d) && !Double.isNaN(d) && d == Math.floor(d)
+                        && d >= Long.MIN_VALUE && d <= Long.MAX_VALUE) {
+                    n = (long) d;
+                } else {
+                    n = d;
+                }
+                attrVal.put("N", BsonNumberConversionUtil.numberToString(n));
+                break;
+            case B:
+                attrVal.put("B", Base64.getEncoder().encodeToString(rs.getBytes(col)));
+                break;
+            default:
+                throw new IllegalStateException(
+                        "Unsupported PK data type for count-only LastEvaluatedKey: " + dataType);
+        }
+        return attrVal;
     }
 
     /**

@@ -132,6 +132,12 @@ public class MiscIT {
                 phoenixDBStreamsClientV2);
     }
 
+    @Test(timeout = 600000)
+    public void testMixWorkflows4WithCount() throws Exception {
+        Misc1Util.test3(dynamoDbClient, phoenixDBClientV2, dynamoDbStreamsClient,
+                phoenixDBStreamsClientV2, true);
+    }
+
     @Test(timeout = 120000)
     public void testMixWorkflows3() throws Exception {
         final String tableName = "tests";
