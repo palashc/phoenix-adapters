@@ -534,35 +534,25 @@ public class UpdateItemIT extends UpdateItemBaseTests {
         UpdateItemResponse phoenixResult3 = phoenixDBClientV2.updateItem(updateRequest);
         Assert.assertEquals(dynamoResult3.attributes(), phoenixResult3.attributes());
 
-        // Test UPDATED_OLD - should fail with error status code in phoenixDBClientV2
+        // Test UPDATED_OLD - now supported on UpdateItem; returns only the touched attribute
+        // paths (here: just `stringField`) with their pre-update values.
         updateRequest = UpdateItemRequest.builder().tableName(tableName).key(key)
             .updateExpression("SET stringField = :val")
             .expressionAttributeValues(expressionAttributeValues)
             .returnValues(ReturnValue.UPDATED_OLD).build();
+        UpdateItemResponse dynamoResult4 = dynamoDbClient.updateItem(updateRequest);
+        UpdateItemResponse phoenixResult4 = phoenixDBClientV2.updateItem(updateRequest);
+        Assert.assertEquals(dynamoResult4.attributes(), phoenixResult4.attributes());
 
-        try {
-            phoenixDBClientV2.updateItem(updateRequest);
-            Assert.fail("Expected DynamoDbException for UPDATED_OLD");
-        } catch (DynamoDbException e) {
-            Assert.assertEquals(400, e.statusCode());
-            Assert.assertTrue(e.getMessage()
-                .contains("UPDATED_OLD or UPDATED_NEW is not supported for ReturnValue"));
-        }
-
-        // Test UPDATED_NEW - should fail with error status code in phoenixDBClientV2
+        // Test UPDATED_NEW - now supported on UpdateItem; returns only the touched attribute
+        // paths with their post-update values.
         updateRequest = UpdateItemRequest.builder().tableName(tableName).key(key)
             .updateExpression("SET stringField = :val")
             .expressionAttributeValues(expressionAttributeValues)
             .returnValues(ReturnValue.UPDATED_NEW).build();
-
-        try {
-            phoenixDBClientV2.updateItem(updateRequest);
-            Assert.fail("Expected DynamoDbException for UPDATED_NEW");
-        } catch (DynamoDbException e) {
-            Assert.assertEquals(400, e.statusCode());
-            Assert.assertTrue(e.getMessage()
-                .contains("UPDATED_OLD or UPDATED_NEW is not supported for ReturnValue"));
-        }
+        UpdateItemResponse dynamoResult5 = dynamoDbClient.updateItem(updateRequest);
+        UpdateItemResponse phoenixResult5 = phoenixDBClientV2.updateItem(updateRequest);
+        Assert.assertEquals(dynamoResult5.attributes(), phoenixResult5.attributes());
 
         // Test invalid value - should fail with same error status code in both clients
         updateRequest = UpdateItemRequest.builder().tableName(tableName).key(key)
@@ -921,5 +911,1370 @@ public class UpdateItemIT extends UpdateItemBaseTests {
         dynamoDbClient.updateItem(req);
         phoenixDBClientV2.updateItem(req);
         validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldTopLevelSet() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :v1, COL1 = :v2");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().s("NewTitle").build());
+        exprAttrVal.put(":v2", AttributeValue.builder().n("999").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewTopLevelSet() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :v1, COL1 = :v2");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().s("NewTitle").build());
+        exprAttrVal.put(":v2", AttributeValue.builder().n("999").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithRemove() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("REMOVE COL3");
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("REMOVE COL2");
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithAddNumber() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("ADD #c :v");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#c", "Counter");
+        uir1.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":v", AttributeValue.builder().n("5").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        // Re-seed so the second half starts from the same baseline (Counter == 66).
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("ADD #c :v");
+        uir2.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":v", AttributeValue.builder().n("4").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithAddOnNonExistingAttr() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("ADD FreshCounter :v");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":v", AttributeValue.builder().n("7").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("ADD AnotherFresh :v");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":v", AttributeValue.builder().n("3").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewNestedPath() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Reviews.FiveStar[0].reviewer starts at "Alice" (see getItem1()).
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#r", "Reviews");
+        exprAttrNames.put("#f", "FiveStar");
+        exprAttrNames.put("#rv", "reviewer");
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET #r.#f[0].#rv = :v");
+        uir1.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":v", AttributeValue.builder().s("Carol").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET #r.#f[0].#rv = :v");
+        uir2.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":v", AttributeValue.builder().s("Dave").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewMixedClauses() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET COL2 = :s REMOVE COL3 ADD COL1 :n");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal1.put(":n", AttributeValue.builder().n("100").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        // Reseed so the NEW half runs against the same baseline as the OLD half.
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET COL2 = :s REMOVE COL3 ADD COL1 :n");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":s", AttributeValue.builder().s("UPD2").build());
+        exprAttrVal2.put(":n", AttributeValue.builder().n("50").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewOnItemCreation() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        // Note: createTableAndPutItem(_, false) creates the table but does NOT seed any row.
+        createTableAndPutItem(tableName, false);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET stringField = :s ADD #c :n");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#c", "counter");
+        uir.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("hello").build());
+        exprAttrVal.put(":n", AttributeValue.builder().n("9").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldOnItemCreation() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, false);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET stringField = :s");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("hello").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewConditionalSuccess() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :s");
+        uir.conditionExpression("COL1 = :cond");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal.put(":cond", AttributeValue.builder().n("1").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewConditionalFailureReturnsFullOldRow() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :s");
+        uir.conditionExpression("COL1 = :bogus");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal.put(":bogus", AttributeValue.builder().n("99999").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        uir.returnValuesOnConditionCheckFailure(ALL_OLD);
+
+        Map<String, AttributeValue> dynamoExceptionItem = null;
+        try {
+            dynamoDbClient.updateItem(uir.build());
+            Assert.fail("Expected ConditionalCheckFailedException from DDB");
+        } catch (ConditionalCheckFailedException e) {
+            Assert.assertEquals(400, e.statusCode());
+            dynamoExceptionItem = e.item();
+            Assert.assertNotNull("RVOCCF=ALL_OLD must surface the existing item",
+                    dynamoExceptionItem);
+        }
+        try {
+            phoenixDBClientV2.updateItem(uir.build());
+            Assert.fail("Expected ConditionalCheckFailedException from Phoenix");
+        } catch (ConditionalCheckFailedException e) {
+            Assert.assertEquals(400, e.statusCode());
+            Assert.assertEquals(dynamoExceptionItem, e.item());
+        }
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithListAppend() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed MyList = [a, b].
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET MyList = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().l(
+                AttributeValue.builder().s("a").build(),
+                AttributeValue.builder().s("b").build()).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET MyList = list_append(MyList, :extra)");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":extra", AttributeValue.builder().l(
+                AttributeValue.builder().s("c").build()).build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        // Reseed MyList = [a, b] so the NEW half starts from the same baseline.
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET MyList = list_append(MyList, :extra)");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":extra", AttributeValue.builder().l(
+                AttributeValue.builder().s("d").build(),
+                AttributeValue.builder().s("e").build()).build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewIfNotExistsOnExistingAttr() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+        // COL2 starts at "Title1" (see getItem1()).
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET COL2 = if_not_exists(COL2, :fallback)");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":fallback", AttributeValue.builder().s("Default").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET COL2 = if_not_exists(COL2, :fallback)");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":fallback", AttributeValue.builder().s("Default").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewIfNotExistsOnMissingAttr() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+        // "Subhead" is not present in getItem1().
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET Subhead = if_not_exists(Subhead, :fallback)");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":fallback", AttributeValue.builder().s("FirstWrite").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        // Reseed so the NEW half also runs against a row where Subhead does not yet exist.
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET Subhead = if_not_exists(Subhead, :fallback)");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":fallback", AttributeValue.builder().s("FirstWrite").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithArithmetic() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+        // COL1 starts at 1, COL4 starts at 34.
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET COL1 = COL1 + :a, COL4 = COL4 - :b");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":a", AttributeValue.builder().n("3").build());
+        exprAttrVal1.put(":b", AttributeValue.builder().n("4").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET COL1 = COL1 + :a, COL4 = COL4 - :b");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":a", AttributeValue.builder().n("3").build());
+        exprAttrVal2.put(":b", AttributeValue.builder().n("4").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewSiblingNestedPaths() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#r", "Reviews");
+        exprAttrNames.put("#f", "FiveStar");
+        exprAttrNames.put("#rv", "reviewer");
+        exprAttrNames.put("#cmt", "comment");
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET #r.#f[0].#rv = :rv, #r.#f[0].#cmt = :cmt");
+        uir1.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":rv", AttributeValue.builder().s("Carol").build());
+        exprAttrVal1.put(":cmt", AttributeValue.builder().s("Great!").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET #r.#f[0].#rv = :rv, #r.#f[0].#cmt = :cmt");
+        uir2.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":rv", AttributeValue.builder().s("Dave").build());
+        exprAttrVal2.put(":cmt", AttributeValue.builder().s("Excellent").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithDeleteFromSet() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed a multi-element string set so a DELETE leaves the set non-empty.
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET TopLevelSet = :ss");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":ss", AttributeValue.builder().ss("a", "b", "c").build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("DELETE TopLevelSet :r");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":r", AttributeValue.builder().ss("b").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        // Reseed the set for the NEW half.
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("DELETE TopLevelSet :r");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":r", AttributeValue.builder().ss("c").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithAddStringSet() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+        // TopLevelSet starts as ss("setMember1") in getItem1().
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("ADD TopLevelSet :a");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":a", AttributeValue.builder().ss("setMember2").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("ADD TopLevelSet :a");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":a", AttributeValue.builder().ss("setMember3").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewAllFourClauses() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed TopLevelSet with multiple elements so DELETE doesn't empty it.
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET TopLevelSet = :ss");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":ss", AttributeValue.builder().ss("x", "y", "z").build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("SET COL2 = :s REMOVE COL3 ADD COL1 :n DELETE TopLevelSet :rm");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal1.put(":n", AttributeValue.builder().n("100").build());
+        exprAttrVal1.put(":rm", AttributeValue.builder().ss("y").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        // Reseed (including TopLevelSet) for the NEW half.
+        seedItem(tableName, getItem1());
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET COL2 = :s REMOVE COL3 ADD COL1 :n DELETE TopLevelSet :rm");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":s", AttributeValue.builder().s("UPD2").build());
+        exprAttrVal2.put(":n", AttributeValue.builder().n("50").build());
+        exprAttrVal2.put(":rm", AttributeValue.builder().ss("z").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldWhenSetCreatesNewAttribute() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        // "BrandNewField" is not present in getItem1().
+        uir1.updateExpression("SET BrandNewField = :v");
+        Map<String, AttributeValue> exprAttrVal1 = new HashMap<>();
+        exprAttrVal1.put(":v", AttributeValue.builder().s("hello").build());
+        uir1.expressionAttributeValues(exprAttrVal1);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("SET AnotherNew = :v");
+        Map<String, AttributeValue> exprAttrVal2 = new HashMap<>();
+        exprAttrVal2.put(":v", AttributeValue.builder().s("world").build());
+        uir2.expressionAttributeValues(exprAttrVal2);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldConditionalSuccess() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :s");
+        uir.conditionExpression("COL1 = :cond");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal.put(":cond", AttributeValue.builder().n("1").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewWithRvoccfAllOldOnSuccess() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :s");
+        uir.conditionExpression("COL1 = :cond");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal.put(":cond", AttributeValue.builder().n("1").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        uir.returnValuesOnConditionCheckFailure(ALL_OLD);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldWithRvoccfAllOldOnSuccess() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET COL2 = :s");
+        uir.conditionExpression("COL1 = :cond");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("UPD").build());
+        exprAttrVal.put(":cond", AttributeValue.builder().n("1").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_OLD);
+        uir.returnValuesOnConditionCheckFailure(ALL_OLD);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewLegacyAttributeUpdatesDelete() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed a multi-element string set so DELETE-with-value leaves the set non-empty.
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET TopLevelSet = :ss");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":ss", AttributeValue.builder().ss("a", "b", "c").build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate> updates =
+                new HashMap<>();
+        // DELETE-without-value -> REMOVE COL3
+        updates.put("COL3", software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate
+                .builder()
+                .action(software.amazon.awssdk.services.dynamodb.model.AttributeAction.DELETE)
+                .build());
+        // DELETE-with-value -> DELETE_FROM_SET TopLevelSet :v
+        updates.put("TopLevelSet", software.amazon.awssdk.services.dynamodb.model
+                .AttributeValueUpdate.builder()
+                .action(software.amazon.awssdk.services.dynamodb.model.AttributeAction.DELETE)
+                .value(AttributeValue.builder().ss("b").build()).build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.attributeUpdates(updates);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        seedItem(tableName, getItem1());
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.attributeUpdates(updates);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewWithLegacyExpected() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        Map<String, software.amazon.awssdk.services.dynamodb.model.ExpectedAttributeValue> expected =
+                new HashMap<>();
+        expected.put("COL1", software.amazon.awssdk.services.dynamodb.model.ExpectedAttributeValue
+                .builder()
+                .comparisonOperator(
+                        software.amazon.awssdk.services.dynamodb.model.ComparisonOperator.EQ)
+                .attributeValueList(AttributeValue.builder().n("1").build()).build());
+
+        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate> updates =
+                new HashMap<>();
+        updates.put("COL2", software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate
+                .builder()
+                .action(software.amazon.awssdk.services.dynamodb.model.AttributeAction.PUT)
+                .value(AttributeValue.builder().s("UPD").build()).build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.attributeUpdates(updates);
+        uir1.expected(expected);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.attributeUpdates(updates);
+        uir2.expected(expected);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testConcurrentConditionalUpdateWithUpdatedNew() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+
+        UpdateItemRequest.Builder uir =
+                UpdateItemRequest.builder().tableName(tableName).key(getKey());
+        uir.updateExpression("SET #1 = #1 + :v1");
+        uir.conditionExpression("#1 < :condVal");
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#1", "COL1");
+        uir.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().n("10").build());
+        exprAttrVal.put(":condVal", AttributeValue.builder().n("5").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        uir.returnValuesOnConditionCheckFailure(ALL_OLD);
+
+        // Pre-condition DDB so subsequent updates fail their condition. Captured payload is the
+        // expected winning UPDATED_NEW projection ({COL1: {N: "11"}}).
+        Map<String, AttributeValue> newItem = dynamoDbClient.updateItem(uir.build()).attributes();
+
+        ExecutorService executorService = Executors.newFixedThreadPool(5);
+        AtomicInteger updateCount = new AtomicInteger(0);
+        AtomicInteger errorCount = new AtomicInteger(0);
+
+        for (int i = 0; i < 5; i++) {
+            executorService.submit(() -> {
+                Map<String, AttributeValue> oldItem = null;
+                try {
+                    dynamoDbClient.updateItem(uir.build());
+                } catch (ConditionalCheckFailedException e) {
+                    oldItem = e.item();
+                }
+                try {
+                    UpdateItemResponse result = phoenixDBClientV2.updateItem(uir.build());
+                    Assert.assertEquals(newItem, result.attributes());
+                    updateCount.incrementAndGet();
+                } catch (ConditionalCheckFailedException e) {
+                    Assert.assertEquals(oldItem, e.item());
+                    errorCount.incrementAndGet();
+                }
+            });
+        }
+        executorService.shutdown();
+        try {
+            boolean terminated = executorService.awaitTermination(30, TimeUnit.SECONDS);
+            if (terminated) {
+                Assert.assertEquals(1, updateCount.get());
+                Assert.assertEquals(4, errorCount.get());
+            } else {
+                Assert.fail(
+                        "testConcurrentConditionalUpdateWithUpdatedNew: threads did not terminate.");
+            }
+        } catch (InterruptedException e) {
+            Assert.fail("testConcurrentConditionalUpdateWithUpdatedNew was interrupted.");
+        }
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewMultiType() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        Map<String, AttributeValue> nested = new HashMap<>();
+        nested.put("inner", AttributeValue.builder().s("deep").build());
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET strAttr = :s, numAttr = :n, binAttr = :b, boolAttr = :bo, "
+                + "nullAttr = :nu, listAttr = :l, mapAttr = :m, ssAttr = :ss, nsAttr = :ns, "
+                + "bsAttr = :bs");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":s", AttributeValue.builder().s("hello").build());
+        exprAttrVal.put(":n", AttributeValue.builder().n("42").build());
+        exprAttrVal.put(":b", AttributeValue.builder()
+                .b(SdkBytes.fromByteArray(new byte[] {1, 2, 3})).build());
+        exprAttrVal.put(":bo", AttributeValue.builder().bool(true).build());
+        exprAttrVal.put(":nu", AttributeValue.builder().nul(true).build());
+        exprAttrVal.put(":l", AttributeValue.builder().l(
+                AttributeValue.builder().s("a").build(),
+                AttributeValue.builder().n("1").build()).build());
+        exprAttrVal.put(":m", AttributeValue.builder().m(nested).build());
+        exprAttrVal.put(":ss", AttributeValue.builder().ss("x", "y").build());
+        exprAttrVal.put(":ns", AttributeValue.builder().ns("1", "2", "3").build());
+        exprAttrVal.put(":bs", AttributeValue.builder().bs(
+                SdkBytes.fromByteArray(new byte[] {4}),
+                SdkBytes.fromByteArray(new byte[] {5})).build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewLegacyAttributeUpdates() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate> updates =
+                new HashMap<>();
+        updates.put("COL2", software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate
+                .builder()
+                .action(software.amazon.awssdk.services.dynamodb.model.AttributeAction.PUT)
+                .value(AttributeValue.builder().s("LegacyTitle").build()).build());
+        updates.put("Counter", software.amazon.awssdk.services.dynamodb.model.AttributeValueUpdate
+                .builder()
+                .action(software.amazon.awssdk.services.dynamodb.model.AttributeAction.ADD)
+                .value(AttributeValue.builder().n("7").build()).build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.attributeUpdates(updates);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        seedItem(tableName, getItem1());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.attributeUpdates(updates);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewMapFieldUpdate() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed MyMap with three sibling fields so the multi-field UPDATE can leave one untouched.
+        Map<String, AttributeValue> seedMyMap = new HashMap<>();
+        seedMyMap.put("field1", AttributeValue.builder().s("orig1").build());
+        seedMyMap.put("field2", AttributeValue.builder().s("orig2").build());
+        seedMyMap.put("field3", AttributeValue.builder().s("orig3").build());
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET MyMap = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().m(seedMyMap).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET MyMap.field2 = :v1, MyMap.field3 = :v2");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().s("UPDATED-2").build());
+        exprAttrVal.put(":v2", AttributeValue.builder().s("UPDATED-3").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewDeepMapFieldUpdate() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed WrapperMap.middle with three siblings and WrapperMap.otherTop as a top-level
+        // sibling so we can touch both branches and leave one leaf untouched.
+        Map<String, AttributeValue> seedMiddle = new HashMap<>();
+        seedMiddle.put("leaf1", AttributeValue.builder().s("a").build());
+        seedMiddle.put("leaf2", AttributeValue.builder().s("b").build());
+        seedMiddle.put("leaf3", AttributeValue.builder().s("c").build());
+        Map<String, AttributeValue> seedWrapper = new HashMap<>();
+        seedWrapper.put("middle", AttributeValue.builder().m(seedMiddle).build());
+        seedWrapper.put("otherTop", AttributeValue.builder().s("y").build());
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET WrapperMap = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().m(seedWrapper).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression(
+            "SET WrapperMap.middle.leaf2 = :v1, WrapperMap.middle.leaf3 = :v2, "
+                + "WrapperMap.otherTop = :v3");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().s("UPDATED-leaf2").build());
+        exprAttrVal.put(":v2", AttributeValue.builder().s("UPDATED-leaf3").build());
+        exprAttrVal.put(":v3", AttributeValue.builder().s("UPDATED-other").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewMixedDotBracketPath() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Build MyHolder.subEntries = [ [map, map, map, map], [map, map, map, map],
+        //                               [map, map, map, map] ]
+        // Each leaf map has a single field `subField` with a positional value.
+        AttributeValue[] outer = new AttributeValue[3];
+        for (int i = 0; i < outer.length; i++) {
+            AttributeValue[] inner = new AttributeValue[4];
+            for (int j = 0; j < inner.length; j++) {
+                Map<String, AttributeValue> leaf = new HashMap<>();
+                leaf.put("subField", AttributeValue.builder().s("orig-" + i + "-" + j).build());
+                inner[j] = AttributeValue.builder().m(leaf).build();
+            }
+            outer[i] = AttributeValue.builder().l(inner).build();
+        }
+        Map<String, AttributeValue> seedHolder = new HashMap<>();
+        seedHolder.put("subEntries", AttributeValue.builder().l(outer).build());
+        seedHolder.put("otherTop", AttributeValue.builder().s("untouched").build());
+
+        // DDB validates that every ExpressionAttributeNames key is actually referenced in the
+        // expression — so the seed (which only mentions #h) needs its own minimal map.
+        Map<String, String> seedAttrNames = new HashMap<>();
+        seedAttrNames.put("#h", "MyHolder");
+
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET #h = :init");
+        seed.expressionAttributeNames(seedAttrNames);
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().m(seedHolder).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        Map<String, String> exprAttrNames = new HashMap<>();
+        exprAttrNames.put("#h", "MyHolder");
+        exprAttrNames.put("#e", "subEntries");
+        exprAttrNames.put("#sf", "subField");
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET #h.#e[1][3].#sf = :v1, #h.#e[2][0].#sf = :v2");
+        uir.expressionAttributeNames(exprAttrNames);
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().s("UPDATED-1-3").build());
+        exprAttrVal.put(":v2", AttributeValue.builder().s("UPDATED-2-0").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewListIndexNonZero() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed MyList with 6 maps so indices 2 and 4 both exist with unchanged neighbors.
+        AttributeValue[] initList = new AttributeValue[6];
+        for (int i = 0; i < initList.length; i++) {
+            Map<String, AttributeValue> el = new HashMap<>();
+            el.put("sku", AttributeValue.builder().s("orig" + i).build());
+            initList[i] = AttributeValue.builder().m(el).build();
+        }
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET MyList = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().l(initList).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir.updateExpression("SET MyList[2].sku = :v1, MyList[4].sku = :v2");
+        Map<String, AttributeValue> exprAttrVal = new HashMap<>();
+        exprAttrVal.put(":v1", AttributeValue.builder().s("UPDATED-2").build());
+        exprAttrVal.put(":v2", AttributeValue.builder().s("UPDATED-4").build());
+        uir.expressionAttributeValues(exprAttrVal);
+        uir.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult = dynamoDbClient.updateItem(uir.build());
+        UpdateItemResponse phoenixResult = phoenixDBClientV2.updateItem(uir.build());
+        Assert.assertEquals(dynamoResult.attributes(), phoenixResult.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewRemoveListIndex() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET MyList = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().l(
+            AttributeValue.builder().s("a").build(),
+            AttributeValue.builder().s("b").build(),
+            AttributeValue.builder().s("c").build(),
+            AttributeValue.builder().s("d").build(),
+            AttributeValue.builder().s("e").build()).build());
+        seed.expressionAttributeValues(seedVals);
+        seed.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoSeed1 = dynamoDbClient.updateItem(seed.build());
+        UpdateItemResponse phoenixSeed1 = phoenixDBClientV2.updateItem(seed.build());
+        Assert.assertEquals(dynamoSeed1.attributes(), phoenixSeed1.attributes());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("REMOVE MyList[2]");
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        UpdateItemResponse dynamoSeed2 = dynamoDbClient.updateItem(seed.build());
+        UpdateItemResponse phoenixSeed2 = phoenixDBClientV2.updateItem(seed.build());
+        Assert.assertEquals(dynamoSeed2.attributes(), phoenixSeed2.attributes());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("REMOVE MyList[2]");
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir3 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir3.updateExpression("REMOVE MyList[0]");
+        uir3.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult3 = dynamoDbClient.updateItem(uir3.build());
+        UpdateItemResponse phoenixResult3 = phoenixDBClientV2.updateItem(uir3.build());
+        Assert.assertEquals(dynamoResult3.attributes(), phoenixResult3.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir4 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir4.updateExpression("REMOVE MyList[4]");
+        uir4.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult4 = dynamoDbClient.updateItem(uir4.build());
+        UpdateItemResponse phoenixResult4 = phoenixDBClientV2.updateItem(uir4.build());
+        Assert.assertEquals(dynamoResult4.attributes(), phoenixResult4.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir5 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir5.updateExpression("REMOVE MyList[0]");
+        uir5.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult5 = dynamoDbClient.updateItem(uir5.build());
+        UpdateItemResponse phoenixResult5 = phoenixDBClientV2.updateItem(uir5.build());
+        Assert.assertEquals(dynamoResult5.attributes(), phoenixResult5.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir6 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir6.updateExpression("REMOVE MyList[4]");
+        uir6.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult6 = dynamoDbClient.updateItem(uir6.build());
+        UpdateItemResponse phoenixResult6 = phoenixDBClientV2.updateItem(uir6.build());
+        Assert.assertEquals(dynamoResult6.attributes(), phoenixResult6.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir7 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir7.updateExpression("REMOVE MyList[4]");
+        uir7.returnValues(ReturnValue.ALL_OLD);
+        UpdateItemResponse dynamoResult7 = dynamoDbClient.updateItem(uir7.build());
+        UpdateItemResponse phoenixResult7 = phoenixDBClientV2.updateItem(uir7.build());
+        Assert.assertEquals(dynamoResult7.attributes(), phoenixResult7.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir8 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir8.updateExpression("REMOVE MyList[4]");
+        uir8.returnValues(ReturnValue.ALL_NEW);
+        UpdateItemResponse dynamoResult8 = dynamoDbClient.updateItem(uir8.build());
+        UpdateItemResponse phoenixResult8 = phoenixDBClientV2.updateItem(uir8.build());
+        Assert.assertEquals(dynamoResult8.attributes(), phoenixResult8.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewRemoveNestedMapField() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        Map<String, AttributeValue> multiFieldMap = new HashMap<>();
+        multiFieldMap.put("field1", AttributeValue.builder().s("a").build());
+        multiFieldMap.put("field2", AttributeValue.builder().s("b").build());
+        multiFieldMap.put("field3", AttributeValue.builder().s("c").build());
+
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET MyMap = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().m(multiFieldMap).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression("REMOVE MyMap.field2");
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression("REMOVE MyMap.field2");
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        Map<String, AttributeValue> singleFieldMap = new HashMap<>();
+        singleFieldMap.put("onlyField", AttributeValue.builder().s("x").build());
+        UpdateItemRequest.Builder seedSingle =
+            UpdateItemRequest.builder().tableName(tableName).key(key);
+        seedSingle.updateExpression("SET MyMap = :init");
+        Map<String, AttributeValue> seedSingleVals = new HashMap<>();
+        seedSingleVals.put(":init", AttributeValue.builder().m(singleFieldMap).build());
+        seedSingle.expressionAttributeValues(seedSingleVals);
+        dynamoDbClient.updateItem(seedSingle.build());
+        phoenixDBClientV2.updateItem(seedSingle.build());
+
+        UpdateItemRequest.Builder uir3 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir3.updateExpression("REMOVE MyMap.onlyField");
+        uir3.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult3 = dynamoDbClient.updateItem(uir3.build());
+        UpdateItemResponse phoenixResult3 = phoenixDBClientV2.updateItem(uir3.build());
+        Assert.assertEquals(dynamoResult3.attributes(), phoenixResult3.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir4 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir4.updateExpression("REMOVE MyMap.field2");
+        uir4.returnValues(ReturnValue.ALL_OLD);
+        UpdateItemResponse dynamoResult4 = dynamoDbClient.updateItem(uir4.build());
+        UpdateItemResponse phoenixResult4 = phoenixDBClientV2.updateItem(uir4.build());
+        Assert.assertEquals(dynamoResult4.attributes(), phoenixResult4.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir5 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir5.updateExpression("REMOVE MyMap.field2");
+        uir5.returnValues(ReturnValue.ALL_NEW);
+        UpdateItemResponse dynamoResult5 = dynamoDbClient.updateItem(uir5.build());
+        UpdateItemResponse phoenixResult5 = phoenixDBClientV2.updateItem(uir5.build());
+        Assert.assertEquals(dynamoResult5.attributes(), phoenixResult5.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedOldNewRemoveDeepMixed() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        Map<String, AttributeValue> key = getKey();
+
+        // Seed MyHolder.subList = [
+        //   { leaf: { targetAttr: "X0", siblingAttr: "Z0" } },
+        //   { leaf: { targetAttr: "X1", siblingAttr: "Z1" } }
+        // ]
+        // Sibling attr means REMOVE MyHolder.subList[1].leaf.targetAttr does not empty
+        // the parent `leaf` map — keeps the leaf-existence vs parent-existence distinction sharp.
+        Map<String, AttributeValue> leaf0 = new HashMap<>();
+        leaf0.put("targetAttr", AttributeValue.builder().s("X0").build());
+        leaf0.put("siblingAttr", AttributeValue.builder().s("Z0").build());
+
+        Map<String, AttributeValue> leaf1 = new HashMap<>();
+        leaf1.put("targetAttr", AttributeValue.builder().s("X1").build());
+        leaf1.put("siblingAttr", AttributeValue.builder().s("Z1").build());
+
+        Map<String, AttributeValue> elem0 = new HashMap<>();
+        elem0.put("leaf", AttributeValue.builder().m(leaf0).build());
+        Map<String, AttributeValue> elem1 = new HashMap<>();
+        elem1.put("leaf", AttributeValue.builder().m(leaf1).build());
+
+        Map<String, AttributeValue> holder = new HashMap<>();
+        holder.put("subList", AttributeValue.builder().l(
+            AttributeValue.builder().m(elem0).build(),
+            AttributeValue.builder().m(elem1).build()).build());
+
+        UpdateItemRequest.Builder seed = UpdateItemRequest.builder().tableName(tableName).key(key);
+        seed.updateExpression("SET MyHolder = :init");
+        Map<String, AttributeValue> seedVals = new HashMap<>();
+        seedVals.put(":init", AttributeValue.builder().m(holder).build());
+        seed.expressionAttributeValues(seedVals);
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        // 5-segment REMOVE: MyHolder . subList [1] . leaf . targetAttr
+        final String removeExpr = "REMOVE MyHolder.subList[1].leaf.targetAttr";
+
+        UpdateItemRequest.Builder uir1 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir1.updateExpression(removeExpr);
+        uir1.returnValues(ReturnValue.UPDATED_OLD);
+        UpdateItemResponse dynamoResult1 = dynamoDbClient.updateItem(uir1.build());
+        UpdateItemResponse phoenixResult1 = phoenixDBClientV2.updateItem(uir1.build());
+        Assert.assertEquals(dynamoResult1.attributes(), phoenixResult1.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir2 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir2.updateExpression(removeExpr);
+        uir2.returnValues(ReturnValue.UPDATED_NEW);
+        UpdateItemResponse dynamoResult2 = dynamoDbClient.updateItem(uir2.build());
+        UpdateItemResponse phoenixResult2 = phoenixDBClientV2.updateItem(uir2.build());
+        Assert.assertEquals(dynamoResult2.attributes(), phoenixResult2.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir3 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir3.updateExpression(removeExpr);
+        uir3.returnValues(ReturnValue.ALL_OLD);
+        UpdateItemResponse dynamoResult3 = dynamoDbClient.updateItem(uir3.build());
+        UpdateItemResponse phoenixResult3 = phoenixDBClientV2.updateItem(uir3.build());
+        Assert.assertEquals(dynamoResult3.attributes(), phoenixResult3.attributes());
+
+        dynamoDbClient.updateItem(seed.build());
+        phoenixDBClientV2.updateItem(seed.build());
+
+        UpdateItemRequest.Builder uir4 = UpdateItemRequest.builder().tableName(tableName).key(key);
+        uir4.updateExpression(removeExpr);
+        uir4.returnValues(ReturnValue.ALL_NEW);
+        UpdateItemResponse dynamoResult4 = dynamoDbClient.updateItem(uir4.build());
+        UpdateItemResponse phoenixResult4 = phoenixDBClientV2.updateItem(uir4.build());
+        Assert.assertEquals(dynamoResult4.attributes(), phoenixResult4.attributes());
+
+        validateItem(tableName, key);
+    }
+
+    @Test(timeout = 120000)
+    public void testUpdatedNewEmptyUpdateRejected() {
+        final String tableName = testName.getMethodName().replaceAll("[\\[\\]]", "");
+        createTableAndPutItem(tableName, true);
+        UpdateItemRequest req = UpdateItemRequest.builder().tableName(tableName).key(getKey())
+            .returnValues(ReturnValue.UPDATED_NEW).build();
+        int dynamoStatusCode = -1;
+        int phoenixStatusCode = -1;
+        try {
+            dynamoDbClient.updateItem(req);
+            Assert.fail("Expected DDB to reject UPDATED_NEW with no update content");
+        } catch (DynamoDbException e) {
+            dynamoStatusCode = e.statusCode();
+        }
+        try {
+            phoenixDBClientV2.updateItem(req);
+            Assert.fail("Expected Phoenix to reject UPDATED_NEW with no update content");
+        } catch (DynamoDbException e) {
+            phoenixStatusCode = e.statusCode();
+        }
+        Assert.assertEquals("DDB and Phoenix should agree on status code", dynamoStatusCode,
+            phoenixStatusCode);
+        Assert.assertEquals("Should be 5xx", 500, phoenixStatusCode);
     }
 }

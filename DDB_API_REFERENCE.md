@@ -285,8 +285,47 @@ Controls what data is returned after a write operation.
 | `NONE` | Yes (default) | Yes (default) | Yes (default) | Returns nothing (only `ConsumedCapacity`) |
 | `ALL_OLD` | Yes | Yes | Yes | Returns the item as it was **before** the operation |
 | `ALL_NEW` | No | Yes | No | Returns the item as it is **after** the operation |
-| `UPDATED_OLD` | -- | **Not supported** (throws 400), use `ALL_OLD` instead | -- | Only applicable to UpdateItem |
-| `UPDATED_NEW` | -- | **Not supported** (throws 400), use `ALL_NEW` instead | -- | Only applicable to UpdateItem |
+| `UPDATED_OLD` | No (throws 400) | Yes | No (throws 400) | Returns **only the touched attribute paths**, with their **before-update** values |
+| `UPDATED_NEW` | No (throws 400) | Yes | No (throws 400) | Returns **only the touched attribute paths**, with their **after-update** values |
+
+**`UPDATED_OLD` / `UPDATED_NEW` projection semantics (UpdateItem only)**
+
+The projection covers the union of attribute paths referenced by the `UpdateExpression`'s `SET`,
+`REMOVE`, `ADD`, and `DELETE` clauses (or the corresponding `AttributeUpdates` entries).
+
+**Core rule.** A touched attribute path `P` contributes the **entire top-level attribute**
+rooted at `P`'s first segment to the response if and only if `P` resolves to an existing element
+in the relevant image (OLD image for `UPDATED_OLD`, post-update NEW image for `UPDATED_NEW`).
+Multiple touched paths sharing the same top-level attribute de-duplicate to a single copy.
+This matches AWS's documented behavior: "If you update a portion of a nested attribute, the
+response includes the entire top-level attribute."
+
+Consequences of the core rule, by clause:
+
+- **Top-level `SET` / `ADD`** (e.g. `SET COL2 = :v`, `ADD Counter :n`): the path always
+  resolves in NEW (it was just written/incremented); in OLD it resolves iff the attribute
+  pre-existed. Response is `{"COL2": <value>}` / `{"Counter": <value>}` when the path resolves,
+  empty otherwise (e.g. `ADD` on a previously-missing attribute is absent from `UPDATED_OLD`).
+- **Nested `SET`** (e.g. `SET nested.field = :v`, `SET items[0].sku = :v`): the leaf always
+  resolves in NEW (the SET created/overwrote it); in OLD it resolves iff that exact leaf
+  pre-existed. The whole top-level (`nested` / `items`) is emitted — untouched siblings inside
+  the map and untouched indices inside the list are preserved verbatim.
+- **Top-level `REMOVE`** (e.g. `REMOVE COL2`): the path is gone in NEW, so `UPDATED_NEW` omits
+  it (`{}`); it existed in OLD, so `UPDATED_OLD` returns the pre-removal value.
+- **Nested map-field `REMOVE`** (e.g. `REMOVE myMap.field`): `myMap.field` is gone in NEW so
+  `UPDATED_NEW` is `{}` even though `myMap` itself still exists; `UPDATED_OLD` returns the
+  whole pre-removal `myMap` (including the removed field).
+- **Nested list-index `REMOVE`** (e.g. `REMOVE myList[N]`): DDB shortens the list by one. The
+  leaf `myList[N]` resolves in NEW iff `N < newLength`. So removing an interior index
+  (`REMOVE myList[2]` on a 5-element list) leaves the post-shift element at `[2]` and emits
+  the whole post-image list; removing the last index (`REMOVE myList[4]` on a 5-element list)
+  leaves `[4]` past the new length so `UPDATED_NEW` is `{}`. `UPDATED_OLD` always emits the
+  whole pre-removal list (the index always existed pre-removal).
+- **`DELETE`** (set-element removal, e.g. `DELETE TopLevelSet :v`): the touched attribute is
+  the top-level set itself, which always still exists post-delete (DDB rejects empty sets).
+  `UPDATED_OLD` returns the pre-delete set; `UPDATED_NEW` returns the post-delete set.
+- **Primary-key columns** are never included unless they are themselves touched by the update
+  expression, which is impossible for keys.
 
 ### 5.6 ReturnValuesOnConditionCheckFailure
 
@@ -953,7 +992,7 @@ Supported `SET` functions and operators:
 
 - `UpdateExpression` and `AttributeUpdates` are mutually exclusive (throws 400; use one or the other)
 - `ConditionExpression` and `Expected` are mutually exclusive (throws 400; use one or the other)
-- `ReturnValues` must be `NONE`, `ALL_OLD`, or `ALL_NEW` (`UPDATED_OLD` and `UPDATED_NEW` throw 400; use `ALL_OLD` or `ALL_NEW` instead)
+- `ReturnValues` must be `NONE`, `ALL_OLD`, `ALL_NEW`, `UPDATED_OLD`, or `UPDATED_NEW`
 - Invalid update expression paths throw 400 with `ValidationException("Invalid document path used for update")`
 
 ---
@@ -1806,8 +1845,6 @@ Each API operation tracks:
 
 | Feature | Status                                             |
 |---|----------------------------------------------------|
-| `UPDATED_OLD` return value (UpdateItem) | Not supported (throws 400), use `ALL_OLD` instead. |
-| `UPDATED_NEW` return value (UpdateItem) | Not supported (throws 400), use `ALL_NEW` instead. |
 | Disabling streams | Not supported once enabled                         |
 | Continuous Backups / PITR | Stub only (always returns DISABLED)                |
 | Transactions (`TransactWriteItems`, `TransactGetItems`) | Not implemented                                    |

@@ -36,8 +36,8 @@ import software.amazon.awssdk.core.exception.SdkServiceException;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.CreateTableRequest;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
-import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
 import java.sql.DriverManager;
 import java.util.HashMap;
@@ -106,12 +106,25 @@ public class ValidationIT {
         phoenixDBClientV2.createTable(createTableRequest);
         Map<String, AttributeValue> item = new HashMap<>();
         item.put("PK", AttributeValue.builder().s("key1").build());
-        Map<String, AttributeValue> key = new HashMap<>();
-        key.put("PK", AttributeValue.builder().s("key1").build());
-        UpdateItemRequest uir = UpdateItemRequest.builder().tableName(tableName).key(key).updateExpression("REMOVE COL").returnValues("UPDATED_OLD").build();
+
+        // UPDATED_OLD / UPDATED_NEW remain unsupported for PutItem (only NONE / ALL_OLD apply
+        // to a write that has no "old vs new updated subset" distinction). UpdateItem accepts
+        // them and projects to the touched attribute paths - covered by UpdateItemIT tests.
+        PutItemRequest pir = PutItemRequest.builder().tableName(tableName).item(item)
+                .returnValues("UPDATED_OLD").build();
         try {
-            phoenixDBClientV2.updateItem(uir);
-            Assert.fail("UpdateItem with unsupported ReturnValue should have given 400 Bad Request.");
+            phoenixDBClientV2.putItem(pir);
+            Assert.fail("PutItem with unsupported ReturnValue should have given 400 Bad Request.");
+        } catch (SdkServiceException e) {
+            Assert.assertEquals(400, e.statusCode());
+            Assert.assertTrue(e.getMessage().contains("not supported for ReturnValue"));
+        }
+
+        PutItemRequest pir2 = PutItemRequest.builder().tableName(tableName).item(item)
+                .returnValues("UPDATED_NEW").build();
+        try {
+            phoenixDBClientV2.putItem(pir2);
+            Assert.fail("PutItem with unsupported ReturnValue should have given 400 Bad Request.");
         } catch (SdkServiceException e) {
             Assert.assertEquals(400, e.statusCode());
             Assert.assertTrue(e.getMessage().contains("not supported for ReturnValue"));

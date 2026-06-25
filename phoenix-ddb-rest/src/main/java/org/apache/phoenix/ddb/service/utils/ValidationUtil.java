@@ -163,7 +163,7 @@ public class ValidationUtil {
      * Validates the ReturnValues parameter based on DynamoDB API specifications.
      * For PutItem: Only NONE and ALL_OLD are valid
      * For DeleteItem: Only NONE and ALL_OLD are valid
-     * For UpdateItem: All values are valid (NONE, ALL_OLD, ALL_NEW, UPDATED_OLD, UPDATED_NEW)
+     * For UpdateItem: NONE, ALL_OLD, ALL_NEW, UPDATED_OLD, UPDATED_NEW are valid
      *
      * @throws ValidationException
      */
@@ -184,13 +184,13 @@ public class ValidationUtil {
                 break;
 
             case UPDATE_ITEM:
-                // All values are valid for UpdateItem
-                if (!ApiMetadata.ALL_OLD.equals(returnValue) && !ApiMetadata.ALL_NEW.equals(
-                    returnValue) && !ApiMetadata.UPDATED_OLD.equals(returnValue)
-                    && !ApiMetadata.UPDATED_NEW.equals(returnValue)) {
+                if (!ApiMetadata.ALL_OLD.equals(returnValue)
+                        && !ApiMetadata.ALL_NEW.equals(returnValue)
+                        && !ApiMetadata.UPDATED_OLD.equals(returnValue)
+                        && !ApiMetadata.UPDATED_NEW.equals(returnValue)) {
                     throw new ValidationException(String.format(
                         "ReturnValues value '%s' is not valid for UpdateItem. Valid "
-                            + "values are: NONE, ALL_OLD, ALL_NEW",
+                            + "values are: NONE, ALL_OLD, ALL_NEW, UPDATED_OLD, UPDATED_NEW",
                         returnValue));
                 }
                 break;
@@ -219,8 +219,9 @@ public class ValidationUtil {
 
     public static void validateReturnValuesRequest(String returnValue,
         String returnValuesOnConditionCheckFailure, ApiOperation apiOperation) {
-        if (ApiMetadata.UPDATED_OLD.equals(returnValue) || ApiMetadata.UPDATED_NEW.equals(
-            returnValue)) {
+        if ((ApiMetadata.UPDATED_OLD.equals(returnValue)
+                || ApiMetadata.UPDATED_NEW.equals(returnValue))
+                && apiOperation != ApiOperation.UPDATE_ITEM) {
             throw new ValidationException(
                 "UPDATED_OLD or UPDATED_NEW is not supported for ReturnValue.");
         }

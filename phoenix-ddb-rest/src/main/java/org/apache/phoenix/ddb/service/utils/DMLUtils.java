@@ -7,6 +7,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import org.apache.phoenix.ddb.service.exceptions.ValidationException;
 import org.bson.RawBsonDocument;
@@ -53,19 +55,18 @@ public class DMLUtils {
         }
     }
 
-    /**
-     * Executes the given PreparedStatement of an UPSERT query for PutItem/UpdateItem API.
-     *
-     * If conditionExpression is given and it fails, throw ConditionalCheckFailedException.
-     *  - if returnValuesOnConditionCheckFailure is ALL_OLD, set the item on the Exception
-     * If conditionExpression succeeds return the item with type of returnValue.
-     *
-     * TODO: UPDATED_OLD | UPDATED_NEW
-     */
     public static Map<String, Object> executeUpdate(PreparedStatement stmt, String returnValue,
-        String returnValuesOnConditionCheckFailure, boolean hasCondExp, boolean canEvaluateExprOnEmptyDoc,
-                                                    List<PColumn> pkCols, ApiOperation apiOperation)
-                            throws SQLException, ConditionCheckFailedException {
+        String returnValuesOnConditionCheckFailure, boolean hasCondExp,
+        boolean canEvaluateExprOnEmptyDoc, List<PColumn> pkCols, ApiOperation apiOperation)
+        throws SQLException, ConditionCheckFailedException {
+        return executeUpdate(stmt, returnValue, returnValuesOnConditionCheckFailure, hasCondExp,
+            canEvaluateExprOnEmptyDoc, pkCols, apiOperation, null);
+    }
+
+    public static Map<String, Object> executeUpdate(PreparedStatement stmt, String returnValue,
+        String returnValuesOnConditionCheckFailure, boolean hasCondExp,
+        boolean canEvaluateExprOnEmptyDoc, List<PColumn> pkCols, ApiOperation apiOperation,
+        Set<String> updatedAttributePaths) throws SQLException, ConditionCheckFailedException {
         try {
             Map<String, Object> returnAttrs = new HashMap<>();
             if (!needReturnRow(returnValue, returnValuesOnConditionCheckFailure)) {
@@ -92,8 +93,7 @@ public class DMLUtils {
                 return new HashMap<>();
             }
             Pair<Integer, ResultSet> resultPair;
-            if (ApiMetadata.ALL_OLD.equals(returnValue)
-                && apiOperation != ApiOperation.DELETE_ITEM) {
+            if (returnOldImage(returnValue) && apiOperation != ApiOperation.DELETE_ITEM) {
                 resultPair =
                     stmt.unwrap(PhoenixPreparedStatement.class).executeAtomicUpdateReturnOldRow();
             } else {
@@ -126,19 +126,28 @@ public class DMLUtils {
             } else {
                 boolean returnValuesInResponse = false;
                 if (apiOperation != ApiOperation.DELETE_ITEM) {
-                    // TODO : reject UPDATED_OLD, UPDATED_NEW cases which are not supported
-                    if (ApiMetadata.ALL_NEW.equals(returnValue) || ApiMetadata.ALL_OLD.equals(
-                        returnValue)) {
+                    if (returnValueInResp(returnValue)) {
                         returnValuesInResponse = true;
                     }
                 } else if (ApiMetadata.ALL_OLD.equals(returnValue) && rawBsonDocument != null) {
                     returnValuesInResponse = true;
                 }
                 if (returnValuesInResponse) {
-                    returnAttrs = BsonDocumentToMap.getFullItem(rawBsonDocument);
-                    Map<String, Object> tmpReturnAttrs = returnAttrs;
+                    boolean projectTouchedPaths = ApiMetadata.UPDATED_OLD.equals(returnValue)
+                        || ApiMetadata.UPDATED_NEW.equals(returnValue);
+                    Map<String, Object> attrMap;
+                    if (projectTouchedPaths) {
+                        Objects.requireNonNull(updatedAttributePaths,
+                            "UPDATED_OLD/UPDATED_NEW requires a non-null touched-path set");
+                        attrMap = rawBsonDocument == null ?
+                            new HashMap<>() :
+                            BsonDocumentToMap.getProjectedItem(rawBsonDocument,
+                                updatedAttributePaths, true);
+                    } else {
+                        attrMap = BsonDocumentToMap.getFullItem(rawBsonDocument);
+                    }
                     returnAttrs = new HashMap<>();
-                    returnAttrs.put(ApiMetadata.ATTRIBUTES, tmpReturnAttrs);
+                    returnAttrs.put(ApiMetadata.ATTRIBUTES, attrMap);
                 }
             }
             return returnAttrs;
@@ -149,6 +158,17 @@ public class DMLUtils {
             }
             throw e;
         }
+    }
+
+    private static boolean returnValueInResp(String returnValue) {
+        return ApiMetadata.ALL_NEW.equals(returnValue) || ApiMetadata.ALL_OLD.equals(returnValue)
+            || ApiMetadata.UPDATED_OLD.equals(returnValue) || ApiMetadata.UPDATED_NEW.equals(
+            returnValue);
+    }
+
+    private static boolean returnOldImage(String returnValue) {
+        return ApiMetadata.ALL_OLD.equals(returnValue) || ApiMetadata.UPDATED_OLD.equals(
+            returnValue);
     }
 
     /**

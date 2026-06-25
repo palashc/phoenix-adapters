@@ -2,6 +2,7 @@ package org.apache.phoenix.ddb.bson;
 
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,24 +18,51 @@ import org.bson.BsonValue;
 public final class BsonDocumentToMap {
 
     /**
-     * Convert the given BsonDocument into DDB item.
-     * This retrieves only the attributes provided in the list attributesToProject.
+     * Project the given {@link BsonDocument} down to the supplied attribute paths and convert the
+     * result into the ddb attribute value map.
      *
-     * @param bsonDocument The BsonDocument.
-     * @return DDB item as attribute map.
+     * @param bsonDocument        the source document
+     * @param attributesToProject paths to retain
+     * @return the DDB AttributeValue map containing only the requested subtrees
      */
     public static Map<String, Object> getProjectedItem(final BsonDocument bsonDocument,
-            List<String> attributesToProject) {
+        Collection<String> attributesToProject) {
+        return getProjectedItem(bsonDocument, attributesToProject, false);
+    }
+
+    public static Map<String, Object> getProjectedItem(final BsonDocument bsonDocument,
+        Collection<String> attributesToProject, boolean emitWholeTopLevelAttribute) {
         if (attributesToProject == null || attributesToProject.isEmpty()) {
             return getFullItem(bsonDocument);
         }
         BsonDocument newDocument = new BsonDocument();
         for (String attribute : attributesToProject) {
-            BsonDocumentConversionUtil.updateNewBsonDocumentByFieldKeyValue(attribute, bsonDocument,
-                    newDocument);
+            if (emitWholeTopLevelAttribute) {
+                String topLevel = topLevelSegment(attribute);
+                if (newDocument.containsKey(topLevel)) {
+                    continue;
+                }
+                BsonDocument probe = new BsonDocument();
+                BsonDocumentConversionUtil.updateNewBsonDocumentByFieldKeyValue(attribute,
+                    bsonDocument, probe);
+                BsonDocumentConversionUtil.removeNullListElements(probe);
+                if (probe.containsKey(topLevel)) {
+                    newDocument.put(topLevel, bsonDocument.get(topLevel));
+                }
+            } else {
+                BsonDocumentConversionUtil.updateNewBsonDocumentByFieldKeyValue(attribute,
+                    bsonDocument, newDocument);
+            }
         }
         BsonDocumentConversionUtil.removeNullListElements(newDocument);
         return getFullItem(newDocument);
+    }
+
+    private static String topLevelSegment(String path) {
+        int dot = path.indexOf('.');
+        int bracket = path.indexOf('[');
+        int boundary = dot < 0 ? bracket : (bracket < 0 ? dot : Math.min(dot, bracket));
+        return boundary < 0 ? path : path.substring(0, boundary);
     }
 
     public static Map<String, Object> getFullItem(BsonDocument document) {

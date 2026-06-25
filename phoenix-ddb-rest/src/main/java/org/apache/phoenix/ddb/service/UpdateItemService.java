@@ -6,13 +6,13 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.phoenix.ddb.service.exceptions.ValidationException;
 import org.apache.phoenix.expression.util.bson.BsonUpdateInvalidArgumentException;
 import org.apache.phoenix.expression.util.bson.UpdateExpressionUtils;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
-import org.bson.RawBsonDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,10 +85,24 @@ public class UpdateItemService {
             boolean hasCondExp = (request.get(ApiMetadata.CONDITION_EXPRESSION) != null) || (
                     request.get(ApiMetadata.EXPECTED) != null);
 
+            String returnValue = (String) request.get(ApiMetadata.RETURN_VALUES);
+            Set<String> touchedPaths = null;
+            if (ApiMetadata.UPDATED_OLD.equals(returnValue) || ApiMetadata.UPDATED_NEW.equals(
+                returnValue)) {
+                touchedPaths =
+                    CommonServiceUtils.getTouchedPathsFromUpdateDoc(statementInfo.updateDoc);
+                if (touchedPaths.isEmpty()) {
+                    throw new PhoenixServiceException(
+                        "UpdateItem with UPDATED_OLD/UPDATED_NEW requires a non-empty "
+                            + "UpdateExpression or AttributeUpdates");
+                }
+            }
+
             Map<String, Object> res = DMLUtils.executeUpdate(statementInfo.stmt,
-                    (String) request.get(ApiMetadata.RETURN_VALUES),
+                    returnValue,
                     (String) request.get(ApiMetadata.RETURN_VALUES_ON_CONDITION_CHECK_FAILURE),
-                    hasCondExp, statementInfo.canEvaluateUpdateExprOnEmptyDoc, pkCols, ApiOperation.UPDATE_ITEM);
+                    hasCondExp, statementInfo.canEvaluateUpdateExprOnEmptyDoc, pkCols,
+                    ApiOperation.UPDATE_ITEM, touchedPaths);
             res.put(ApiMetadata.CONSUMED_CAPACITY,
                     CommonServiceUtils.getConsumedCapacity((String)request.get(ApiMetadata.TABLE_NAME)));
             return res;

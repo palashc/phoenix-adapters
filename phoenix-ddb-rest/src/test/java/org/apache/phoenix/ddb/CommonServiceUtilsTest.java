@@ -19,8 +19,13 @@ package org.apache.phoenix.ddb;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.phoenix.ddb.utils.CommonServiceUtils;
+import org.bson.BsonDocument;
+import org.bson.BsonInt32;
+import org.bson.BsonNull;
+import org.bson.BsonString;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -252,5 +257,92 @@ public class CommonServiceUtilsTest {
         exprAttrNames.put("#2", "b");
         String result = CommonServiceUtils.replaceExpressionAttributeNames(input, exprAttrNames);
         Assert.assertEquals("ab", result);
+    }
+
+    // ---- getTouchedPathsFromUpdateDoc ----
+
+    @Test
+    public void testGetTouchedPathsFromUpdateDoc_null() {
+        Set<String> paths = CommonServiceUtils.getTouchedPathsFromUpdateDoc(null);
+        Assert.assertNotNull(paths);
+        Assert.assertTrue(paths.isEmpty());
+    }
+
+    @Test
+    public void testGetTouchedPathsFromUpdateDoc_emptyDoc() {
+        Set<String> paths = CommonServiceUtils.getTouchedPathsFromUpdateDoc(new BsonDocument());
+        Assert.assertTrue(paths.isEmpty());
+    }
+
+    @Test
+    public void testGetTouchedPathsFromUpdateDoc_setOnly() {
+        BsonDocument updateDoc = new BsonDocument();
+        BsonDocument setDoc = new BsonDocument();
+        setDoc.put("name", new BsonString("Bob"));
+        setDoc.put("address.city", new BsonString("Portland"));
+        updateDoc.put("$SET", setDoc);
+
+        Set<String> paths = CommonServiceUtils.getTouchedPathsFromUpdateDoc(updateDoc);
+        Assert.assertEquals(2, paths.size());
+        Assert.assertTrue(paths.contains("name"));
+        Assert.assertTrue(paths.contains("address.city"));
+    }
+
+    @Test
+    public void testGetTouchedPathsFromUpdateDoc_allClauses() {
+        BsonDocument updateDoc = new BsonDocument();
+        BsonDocument setDoc = new BsonDocument();
+        setDoc.put("name", new BsonString("Bob"));
+        updateDoc.put("$SET", setDoc);
+
+        BsonDocument unsetDoc = new BsonDocument();
+        unsetDoc.put("oldField", BsonNull.VALUE);
+        unsetDoc.put("nested.legacy", BsonNull.VALUE);
+        updateDoc.put("$UNSET", unsetDoc);
+
+        BsonDocument addDoc = new BsonDocument();
+        addDoc.put("counter", new BsonInt32(1));
+        updateDoc.put("$ADD", addDoc);
+
+        BsonDocument delDoc = new BsonDocument();
+        delDoc.put("tags", new BsonString(":t1"));
+        updateDoc.put("$DELETE_FROM_SET", delDoc);
+
+        Set<String> paths = CommonServiceUtils.getTouchedPathsFromUpdateDoc(updateDoc);
+        Assert.assertEquals(5, paths.size());
+        Assert.assertTrue(paths.contains("name"));
+        Assert.assertTrue(paths.contains("oldField"));
+        Assert.assertTrue(paths.contains("nested.legacy"));
+        Assert.assertTrue(paths.contains("counter"));
+        Assert.assertTrue(paths.contains("tags"));
+    }
+
+    @Test
+    public void testGetTouchedPathsFromUpdateDoc_listIndexPath() {
+        BsonDocument updateDoc = new BsonDocument();
+        BsonDocument setDoc = new BsonDocument();
+        // Path produced by PathResolver for `SET items[0].sku = :v` is "items[0].sku".
+        setDoc.put("items[0].sku", new BsonString("ABC"));
+        updateDoc.put("$SET", setDoc);
+
+        Set<String> paths = CommonServiceUtils.getTouchedPathsFromUpdateDoc(updateDoc);
+        Assert.assertEquals(1, paths.size());
+        Assert.assertTrue(paths.contains("items[0].sku"));
+    }
+
+    @Test
+    public void testGetTouchedPathsFromUpdateDoc_unknownTopLevelKeysAreIgnored() {
+        // The adapter never emits these, but extra keys outside the four supported clauses
+        // must not pollute the touched-path set.
+        BsonDocument updateDoc = new BsonDocument();
+        BsonDocument setDoc = new BsonDocument();
+        setDoc.put("name", new BsonString("Bob"));
+        updateDoc.put("$SET", setDoc);
+        updateDoc.put("$WHATEVER",
+                new BsonDocument("ignored", new BsonString("x")));
+
+        Set<String> paths = CommonServiceUtils.getTouchedPathsFromUpdateDoc(updateDoc);
+        Assert.assertEquals(1, paths.size());
+        Assert.assertTrue(paths.contains("name"));
     }
 }

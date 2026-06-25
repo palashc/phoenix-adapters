@@ -36,11 +36,14 @@ import org.apache.phoenix.schema.types.PVarchar;
 import org.bson.BsonDocument;
 import org.bson.BsonNull;
 import org.bson.BsonString;
+import org.bson.BsonValue;
 
 import java.util.Map;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -55,6 +58,10 @@ public class CommonServiceUtils {
     private static final BsonDocument EMPTY_BSON_DOC = new BsonDocument();
     private static final RawBsonDocument EMPTY_RAW_BSON_DOC = RawBsonDocument.parse("{}");
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonServiceUtils.class);
+
+    private static final String[] UPDATE_DOC_CLAUSES = {
+        "$SET", "$UNSET", "$ADD", "$DELETE_FROM_SET"
+    };
 
     public static boolean isCauseMessageAvailable(Exception e) {
         return e.getCause() != null && e.getCause().getMessage() != null;
@@ -153,6 +160,20 @@ public class CommonServiceUtils {
             Map<String, String> exprAttrNames, Map<String, Object> exprAttrVals) {
         return UpdateExpressionToBson.toBsonUpdateDocument(updateExpr,
                 MapToBsonDocument.getBsonDocument(exprAttrVals), exprAttrNames);
+    }
+
+    public static Set<String> getTouchedPathsFromUpdateDoc(BsonDocument updateDoc) {
+        Set<String> paths = new HashSet<>();
+        if (updateDoc == null) {
+            return paths;
+        }
+        for (String clauseKey : UPDATE_DOC_CLAUSES) {
+            BsonValue clause = updateDoc.get(clauseKey);
+            if (clause != null && clause.isDocument()) {
+                paths.addAll(clause.asDocument().keySet());
+            }
+        }
+        return paths;
     }
 
     /**
