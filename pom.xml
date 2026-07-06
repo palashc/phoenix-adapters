@@ -39,6 +39,50 @@
   <artifactId>phoenix-adapters</artifactId>
   <version>1.0.0-SNAPSHOT</version>
 
+  <description>Adapters that expose NoSQL database APIs (e.g. Amazon DynamoDB) backed by Apache
+    Phoenix on Apache HBase.</description>
+  <url>https://phoenix.apache.org/</url>
+  <inceptionYear>2024</inceptionYear>
+
+  <scm>
+    <connection>scm:git:https://gitbox.apache.org/repos/asf/phoenix-adapters.git</connection>
+    <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/phoenix-adapters.git</developerConnection>
+    <url>https://gitbox.apache.org/repos/asf?p=phoenix-adapters.git</url>
+    <tag>HEAD</tag>
+  </scm>
+
+  <issueManagement>
+    <system>JIRA</system>
+    <url>https://issues.apache.org/jira/browse/PHOENIX</url>
+  </issueManagement>
+
+  <mailingLists>
+    <mailingList>
+      <name>User List</name>
+      <subscribe>user-subscribe@phoenix.apache.org</subscribe>
+      <unsubscribe>user-unsubscribe@phoenix.apache.org</unsubscribe>
+      <post>user@phoenix.apache.org</post>
+      <archive>https://lists.apache.org/list.html?user@phoenix.apache.org</archive>
+    </mailingList>
+    <mailingList>
+      <name>Developer List</name>
+      <subscribe>dev-subscribe@phoenix.apache.org</subscribe>
+      <unsubscribe>dev-unsubscribe@phoenix.apache.org</unsubscribe>
+      <post>dev@phoenix.apache.org</post>
+      <archive>https://lists.apache.org/list.html?dev@phoenix.apache.org</archive>
+    </mailingList>
+  </mailingLists>
+
+  <developers>
+    <developer>
+      <id>dev</id>
+      <name>The Apache Phoenix Team</name>
+      <email>dev@phoenix.apache.org</email>
+      <organization>Apache Software Foundation</organization>
+      <organizationUrl>https://www.apache.org</organizationUrl>
+    </developer>
+  </developers>
+
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java.version>1.8</java.version>
@@ -116,6 +160,48 @@
             </execution>
           </executions>
         </plugin>
+        <plugin>
+          <groupId>org.apache.rat</groupId>
+          <artifactId>apache-rat-plugin</artifactId>
+          <version>0.16.1</version>
+          <configuration>
+            <consoleOutput>true</consoleOutput>
+            <excludes>
+              <!-- Build output, IDE and VCS metadata -->
+              <exclude>**/target/**</exclude>
+              <exclude>**/*.iml</exclude>
+              <exclude>.idea/**</exclude>
+              <exclude>.vscode/**</exclude>
+              <exclude>.git/**</exclude>
+              <exclude>.gitignore</exclude>
+              <exclude>.gitattributes</exclude>
+              <exclude>**/*.log</exclude>
+              <exclude>**/*.log.*</exclude>
+              <exclude>**/logs/**</exclude>
+              <exclude>**/dependency-reduced-pom.xml</exclude>
+              <!-- Documentation and data files that cannot carry an ASF header -->
+              <exclude>**/*.md</exclude>
+              <exclude>**/*.json</exclude>
+              <exclude>**/*.txt</exclude>
+              <exclude>**/*.jpeg</exclude>
+              <exclude>**/*.jpg</exclude>
+              <exclude>**/*.png</exclude>
+              <exclude>**/*.svg</exclude>
+              <!-- Release manager vote email template (rendered, not source) -->
+              <exclude>dev/create-release/vote.tmpl</exclude>
+              <!-- Generated changelog/release notes (produced by Yetus releasedocmaker) -->
+              <exclude>CHANGES.md</exclude>
+              <exclude>RELEASENOTES.md</exclude>
+              <!-- Property/config resources without header support -->
+              <exclude>**/*.properties</exclude>
+              <exclude>docker/conf/**</exclude>
+              <exclude>conf/**</exclude>
+              <!-- Third-party licensing artifacts -->
+              <exclude>LICENSE</exclude>
+              <exclude>NOTICE</exclude>
+            </excludes>
+          </configuration>
+        </plugin>
       </plugins>
     </pluginManagement>
   </build>
@@ -133,6 +219,62 @@
                 <id>prepare-agent</id>
                 <goals>
                   <goal>prepare-agent</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <!--
+      Activated by the release scripts (dev/create-release) via -Papache-release,release.
+      Produces the -sources.jar and -javadoc.jar artifacts required for publishing to the
+      ASF Nexus / Maven Central staging repository, and enforces the Apache RAT license check.
+      Source/javadoc goals are automatically skipped for pom-packaging modules.
+    -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jar-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <configuration>
+              <failOnError>false</failOnError>
+              <doclint>none</doclint>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.rat</groupId>
+            <artifactId>apache-rat-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>rat-check</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
                 </goals>
               </execution>
             </executions>

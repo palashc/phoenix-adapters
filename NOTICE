@@ -1,0 +1,15 @@
+Apache Phoenix Adapters
+Copyright 2024-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+-----------------------------------------------------------------------------
+NOTE TO THE RELEASE MANAGER
+-----------------------------------------------------------------------------
+The binary distribution bundles third-party dependencies that ship their own
+NOTICE files. Before calling a release vote, aggregate the required attribution
+notices from every bundled dependency's NOTICE (Apache Phoenix, Apache HBase,
+Apache Hadoop, Apache ZooKeeper, Apache Log4j 2, AWS SDK for Java, etc.) into
+this file, per https://infra.apache.org/licensing-howto.html#mod-notice .
+Only content actually required by a bundled dependency's own NOTICE belongs here.

@@ -15,6 +15,11 @@
     <name>Phoenix Adapters - Coverage Report</name>
     <description>Module dedicated to generating aggregated code coverage reports</description>
 
+    <properties>
+        <!-- Internal reporting aggregator; not a published release artifact. -->
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <dependencies>
         <!-- Dependencies on modules we want to include in coverage -->
         <dependency>
