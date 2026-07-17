@@ -85,7 +85,7 @@ public class UpdateTableService {
                             = (List<Map<String, Object>>) request.get(ApiMetadata.ATTRIBUTE_DEFINITIONS);
                     List<Map<String, Object>> keySchema
                             = (List<Map<String, Object>>) createIndexUpdate.get(ApiMetadata.KEY_SCHEMA);
-                    CreateTableService.addIndexDDL(tableName, keySchema, attrDefs, indexDDLs, indexName, true);
+                    CreateTableService.addIndexDDL(tableName, keySchema, attrDefs, indexDDLs, indexName, true, null);
                     LOGGER.info("DDL for Create Index: {}", indexDDLs);
                     indexDDLs.addAll(ddl);
                 } else {

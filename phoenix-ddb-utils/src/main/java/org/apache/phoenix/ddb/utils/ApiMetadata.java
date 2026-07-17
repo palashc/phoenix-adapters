@@ -53,6 +53,15 @@ public class ApiMetadata {
     public static final String GLOBAL_SECONDARY_INDEXES = "GlobalSecondaryIndexes";
     public static final String GLOBAL_SECONDARY_INDEX_UPDATES = "GlobalSecondaryIndexUpdates";
 
+    // ---------- Tags ----------
+    public static final String TAGS = "Tags";
+    public static final String TAG_KEY = "Key";
+    public static final String TAG_VALUE = "Value";
+    // Table-wide override of secondary index consistency. Only STRONG is accepted; when absent
+    // the configured default (EVENTUAL) applies.
+    public static final String TAG_INDEX_CONSISTENCY = "phoenix.index.consistency";
+    public static final String INDEX_CONSISTENCY_STRONG = "STRONG";
+
     // ---------- UpdateTable ----------
     public static final String CREATE = "Create";
     public static final String DELETE = "Delete";

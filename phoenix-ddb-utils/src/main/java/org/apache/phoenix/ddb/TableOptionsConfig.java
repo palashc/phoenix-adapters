@@ -13,9 +13,12 @@ public class TableOptionsConfig {
     private static final String TABLE_CONFIG_FILE = "phoenix-table-options.properties";
     private static final String INDEX_CONFIG_FILE = "phoenix-index-options.properties";
     private static final String UPDATE_CACHE_FREQUENCY_KEY = "UPDATE_CACHE_FREQUENCY";
+    private static final String CONSISTENCY_KEY = "CONSISTENCY";
 
     private static String tableOptionsString;
     private static String indexOptionsString;
+    private static String indexBaseOptionsString;
+    private static String defaultIndexConsistency;
     private static String cdcOptionsString;
 
     /**
@@ -24,6 +27,10 @@ public class TableOptionsConfig {
     public static void initialize() throws IOException {
         tableOptionsString = buildOptionsString(TABLE_CONFIG_FILE, "table");
         indexOptionsString = buildOptionsString(INDEX_CONFIG_FILE, "index");
+        Properties indexProps = loadConfiguration(INDEX_CONFIG_FILE, "index");
+        defaultIndexConsistency = indexProps.getProperty(CONSISTENCY_KEY);
+        indexProps.remove(CONSISTENCY_KEY);
+        indexBaseOptionsString = joinOptions(indexProps);
         cdcOptionsString = buildCdcOptionsString(TABLE_CONFIG_FILE);
         LOGGER.info("Initialized table, index, and CDC configurations");
     }
@@ -46,6 +53,22 @@ public class TableOptionsConfig {
             throw new IllegalStateException("Index Options Config not initialized.");
         }
         return indexOptionsString;
+    }
+
+    /**
+     * Get index options with an optional CONSISTENCY override. When {@code consistencyOverride}
+     * is null the configured default consistency is used.
+     */
+    public static String getIndexOptions(String consistencyOverride) {
+        if (indexBaseOptionsString == null) {
+            throw new IllegalStateException("Index Options Config not initialized.");
+        }
+        String consistency =
+                consistencyOverride != null ? consistencyOverride : defaultIndexConsistency;
+        if (consistency == null) {
+            return indexBaseOptionsString;
+        }
+        return indexBaseOptionsString + "," + CONSISTENCY_KEY + "=" + consistency;
     }
 
     /**
@@ -75,8 +98,10 @@ public class TableOptionsConfig {
      */
     private static String buildOptionsString(String configFile, String configType)
             throws IOException {
-        Properties props = loadConfiguration(configFile, configType);
+        return joinOptions(loadConfiguration(configFile, configType));
+    }
 
+    private static String joinOptions(Properties props) {
         return String.join(",", props.stringPropertyNames().stream().map(key -> {
             // Handle quoted properties for HBase/Phoenix specific options
             if (key.contains(".")) {

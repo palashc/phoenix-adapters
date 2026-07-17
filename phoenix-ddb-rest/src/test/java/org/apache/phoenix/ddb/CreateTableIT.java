@@ -60,15 +60,20 @@ import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.dynamodb.model.ResourceInUseException;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.dynamodb.model.TableDescription;
+import software.amazon.awssdk.services.dynamodb.model.Tag;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.phoenix.ddb.rest.RESTServer;
+import org.apache.phoenix.ddb.utils.ApiMetadata;
 import org.apache.phoenix.end2end.ServerMetadataCacheTestImpl;
 import org.apache.phoenix.exception.PhoenixIOException;
 import org.apache.phoenix.jdbc.PhoenixConnection;
 import org.apache.phoenix.jdbc.PhoenixDriver;
 import org.apache.phoenix.schema.PColumn;
+import org.apache.phoenix.schema.PTable;
+import org.apache.phoenix.schema.PTableKey;
+import org.apache.phoenix.schema.types.IndexConsistency;
 import org.apache.phoenix.util.PhoenixRuntime;
 import org.apache.phoenix.util.ServerUtil;
 
@@ -316,6 +321,53 @@ public class CreateTableIT {
         TestUtils.validateTableProps(url, tableName, false);
         TestUtils.validateTableProps(url, tableName + "_IDX1_" + tableName, true);
         TestUtils.validateCdcProps(url, tableName);
+    }
+
+    @Test(timeout = 120000)
+    public void createTableWithStrongConsistencyTag() throws Exception {
+        final String tableName = testName.getMethodName().toUpperCase();
+        CreateTableRequest createTableRequest =
+                DDLTestUtils.getCreateTableRequest(tableName, "PK1", ScalarAttributeType.B, "PK2",
+                        ScalarAttributeType.S);
+        final String gsi = "IDX1_" + tableName;
+        final String lsi = "IDX2_" + tableName;
+        createTableRequest = DDLTestUtils.addIndexToRequest(true, createTableRequest, gsi, "COL1",
+                ScalarAttributeType.N, "COL2", ScalarAttributeType.B);
+        createTableRequest = DDLTestUtils.addIndexToRequest(false, createTableRequest, lsi, "PK1",
+                ScalarAttributeType.B, "LCOL2", ScalarAttributeType.S);
+        createTableRequest = createTableRequest.toBuilder().tags(Tag.builder()
+                .key(ApiMetadata.TAG_INDEX_CONSISTENCY).value(ApiMetadata.INDEX_CONSISTENCY_STRONG)
+                .build()).build();
+
+        phoenixDBClientV2.createTable(createTableRequest);
+
+        assertIndexConsistency(tableName, gsi, IndexConsistency.STRONG);
+        assertIndexConsistency(tableName, lsi, IndexConsistency.STRONG);
+    }
+
+    @Test(timeout = 120000)
+    public void createTableDefaultsToEventualConsistency() throws Exception {
+        final String tableName = testName.getMethodName().toUpperCase();
+        CreateTableRequest createTableRequest =
+                DDLTestUtils.getCreateTableRequest(tableName, "PK1", ScalarAttributeType.B, "PK2",
+                        ScalarAttributeType.S);
+        final String gsi = "IDX1_" + tableName;
+        createTableRequest = DDLTestUtils.addIndexToRequest(true, createTableRequest, gsi, "COL1",
+                ScalarAttributeType.N, "COL2", ScalarAttributeType.B);
+
+        phoenixDBClientV2.createTable(createTableRequest);
+
+        assertIndexConsistency(tableName, gsi, IndexConsistency.EVENTUAL);
+    }
+
+    private static void assertIndexConsistency(String tableName, String indexName,
+            IndexConsistency expected) throws Exception {
+        String fullIndexName = PhoenixUtils.getFullTableName(tableName + "_" + indexName, false);
+        try (Connection connection = DriverManager.getConnection(url)) {
+            PhoenixConnection pconn = connection.unwrap(PhoenixConnection.class);
+            PTable index = pconn.getTable(new PTableKey(pconn.getTenantId(), fullIndexName));
+            Assert.assertEquals(expected, index.getIndexConsistency());
+        }
     }
 
     @Test(timeout = 120000)

@@ -62,7 +62,7 @@ public class CreateTableService {
 
     public static void addIndexDDL(String tableName, List<Map<String, Object>> keySchemaElements,
             List<Map<String, Object>> attributeDefinitions, List<String> indexDDLs,
-            String indexName, boolean isAsync) {
+            String indexName, boolean isAsync, String indexConsistency) {
         final StringBuilder indexOn = new StringBuilder();
 
         String indexHashKey = null;
@@ -163,13 +163,14 @@ public class CreateTableService {
                 + ") WHERE " + indexHashKey + " IS NOT " + "NULL " + ((indexSortKey
                 != null) ? " AND " + indexSortKey + " IS NOT " + "NULL " : "") + (isAsync ?
                 " ASYNC " :
-                "") + TableOptionsConfig.getIndexOptions());
+                "") + TableOptionsConfig.getIndexOptions(indexConsistency));
     }
 
     public static List<String> getIndexDDLs(Map<String, Object> request) {
         final List<String> indexDDLs = new ArrayList<>();
         List<Map<String, Object>> attributeDefinitions =
                 (List<Map<String, Object>>) request.get(ApiMetadata.ATTRIBUTE_DEFINITIONS);
+        final String indexConsistency = resolveIndexConsistency(request);
 
         if (request.get(ApiMetadata.GLOBAL_SECONDARY_INDEXES) != null) {
             for (Map<String, Object> globalSecondaryIndex : (List<Map<String, Object>>) request.get(
@@ -178,7 +179,7 @@ public class CreateTableService {
                 final List<Map<String, Object>> keySchemaElements =
                         (List<Map<String, Object>>) globalSecondaryIndex.get(ApiMetadata.KEY_SCHEMA);
                 addIndexDDL((String)request.get(ApiMetadata.TABLE_NAME), keySchemaElements,
-                        attributeDefinitions, indexDDLs, indexName, false);
+                        attributeDefinitions, indexDDLs, indexName, false, indexConsistency);
             }
         }
 
@@ -189,10 +190,35 @@ public class CreateTableService {
                 final List<Map<String, Object>> keySchemaElements =
                         (List<Map<String, Object>>) localSecondaryIndex.get(ApiMetadata.KEY_SCHEMA);
                 addIndexDDL((String)request.get(ApiMetadata.TABLE_NAME), keySchemaElements,
-                        attributeDefinitions, indexDDLs, indexName, false);
+                        attributeDefinitions, indexDDLs, indexName, false, indexConsistency);
             }
         }
         return indexDDLs;
+    }
+
+    /**
+     * Resolves the table-wide secondary index consistency from request Tags. Returns
+     * {@code STRONG} when the {@code phoenix.index.consistency} tag requests it, or null to fall
+     * back to the configured default. Only STRONG is accepted as an override value.
+     */
+    static String resolveIndexConsistency(Map<String, Object> request) {
+        List<Map<String, Object>> tags =
+                (List<Map<String, Object>>) request.get(ApiMetadata.TAGS);
+        if (tags == null) {
+            return null;
+        }
+        for (Map<String, Object> tag : tags) {
+            if (ApiMetadata.TAG_INDEX_CONSISTENCY.equals(tag.get(ApiMetadata.TAG_KEY))) {
+                String value = (String) tag.get(ApiMetadata.TAG_VALUE);
+                if (ApiMetadata.INDEX_CONSISTENCY_STRONG.equalsIgnoreCase(value)) {
+                    return ApiMetadata.INDEX_CONSISTENCY_STRONG;
+                }
+                throw new ValidationException("Unsupported value '" + value + "' for tag "
+                        + ApiMetadata.TAG_INDEX_CONSISTENCY + "; only "
+                        + ApiMetadata.INDEX_CONSISTENCY_STRONG + " is supported");
+            }
+        }
+        return null;
     }
 
     /**
